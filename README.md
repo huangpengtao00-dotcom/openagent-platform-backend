@@ -1,5 +1,7 @@
 # OpenAgent Platform Backend
 
+[![CI](https://github.com/huangpengtao00-dotcom/openagent-platform-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/huangpengtao00-dotcom/openagent-platform-backend/actions/workflows/ci.yml)
+
 FastAPI backend for service-wrapping OpenAgent Harness. The Harness executes coding-agent tasks; this Platform layer manages tasks, async runs, state, artifacts, idempotency, rate limiting, cache policy, and cost metrics.
 
 ## Scope
@@ -14,6 +16,10 @@ The backend never stores API keys and never reimplements the agent loop. It call
 ```bash
 python -m openagent_harness.cli run <task.json> --mode local --model scripted --runs ./artifacts/harness_runs
 ```
+
+Related repository:
+
+- OpenAgent Harness: https://github.com/huangpengtao00-dotcom/openagent-harness
 
 ## Run Locally
 
@@ -39,7 +45,7 @@ http://127.0.0.1:8000/docs
 $task = @{
   name = "retry-429-real"
   description = "Fix HTTP 429 retry logic"
-  harness_task_path = "C:/Users/hpt/Desktop/备份/OpenAgent-Harness-v1-final/benchmarks_realistic/retry-429-real/task.json"
+  harness_task_path = "../OpenAgent-Harness-v1-final/benchmarks_realistic/retry-429-real/task.json"
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/tasks -ContentType "application/json" -Body $task
@@ -110,3 +116,9 @@ The tests cover health, idempotent run creation, artifact serving, path sandboxi
 ## Cache Backend
 
 With `ENABLE_REDIS=false`, cache and rate limiting use in-memory fallbacks for local demos. With `ENABLE_REDIS=true`, rate limiting and cache reads/writes use Redis; if Redis is unavailable, the service falls back to memory so local startup still works.
+
+## Interview Materials
+
+- `docs/architecture_diagram.md`
+- `docs/demo_walkthrough.md`
+- `docs/interview_playbook_cn.md`
