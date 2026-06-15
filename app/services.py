@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -82,6 +83,10 @@ def execute_run(db: Session, run_id: int, client: HarnessClient, settings: Setti
         run.failure_type = result.failure_type
         run.error_message = None if run.status == RunStatus.passed.value else result.failure_type
         upsert_usage(db, run, result.usage)
+    except subprocess.TimeoutExpired as exc:
+        run.status = RunStatus.timeout.value
+        run.failure_type = "timeout"
+        run.error_message = str(exc)
     except Exception as exc:
         run.status = RunStatus.failed.value
         run.failure_type = type(exc).__name__
