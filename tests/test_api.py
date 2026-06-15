@@ -91,3 +91,16 @@ def test_cancel_pending_run(client, monkeypatch):
 
     assert res.status_code == 200
     assert res.json()["status"] == "cancelled"
+
+
+def test_post_run_can_leave_work_for_external_worker(client, monkeypatch):
+    task_id = create_task(client)
+    called = {"value": False}
+    monkeypatch.setattr("app.main._schedule_run", lambda background_tasks, run_id: called.update(value=True))
+    monkeypatch.setattr("app.main.settings.auto_start_runs", False)
+
+    res = client.post("/runs", json={"task_id": task_id}, headers={"Idempotency-Key": "external-worker"})
+
+    assert res.status_code == 200
+    assert res.json()["status"] == "pending"
+    assert called["value"] is False

@@ -65,7 +65,7 @@ def post_run(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RateLimitExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
-    if run.status == "pending":
+    if run.status == "pending" and settings.auto_start_runs:
         _schedule_run(background_tasks, run.id)
     return _run_out(run)
 

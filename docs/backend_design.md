@@ -15,7 +15,7 @@ pending -> running -> timeout
 pending/running -> cancelled
 ```
 
-The v0.2 local worker uses FastAPI BackgroundTasks. This keeps the demo easy to run while leaving a clear migration path to Redis Queue, Celery, Dramatiq, or a separate worker process. `timeout_seconds` is forwarded to the Harness subprocess so one run cannot hang forever.
+The local demo can use FastAPI BackgroundTasks through `AUTO_START_RUNS=true`. For a more production-like split, set `AUTO_START_RUNS=false` and run `python -m app.worker`; the API writes pending rows and the worker consumes them. `timeout_seconds` is forwarded to the Harness subprocess so one run cannot hang forever.
 
 ## Persistence
 

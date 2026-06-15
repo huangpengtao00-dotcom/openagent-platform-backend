@@ -37,6 +37,7 @@ class Settings:
     cache_negative_ttl_seconds: int
     cache_ttl_jitter_seconds: int
     allow_real_llm_calls: bool
+    auto_start_runs: bool
 
 
 def load_settings() -> Settings:
@@ -56,4 +57,5 @@ def load_settings() -> Settings:
         cache_negative_ttl_seconds=_int("CACHE_NEGATIVE_TTL_SECONDS", 60),
         cache_ttl_jitter_seconds=_int("CACHE_TTL_JITTER_SECONDS", 60),
         allow_real_llm_calls=_bool("ALLOW_REAL_LLM_CALLS", False),
+        auto_start_runs=_bool("AUTO_START_RUNS", True),
     )

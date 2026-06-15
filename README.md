@@ -82,6 +82,23 @@ This double opt-in prevents accidental spending. Do not commit `.env`.
 
 For manual demos, keep total real API smoke spending under `DEMO_COST_BUDGET_CNY`. A single `deepseek-v4-flash` realistic task is expected to be tiny, but check `/metrics/cost` after every real run.
 
+## Worker Mode
+
+For local demos, `AUTO_START_RUNS=true` lets FastAPI schedule runs with `BackgroundTasks`. For a more production-like split, set:
+
+```env
+AUTO_START_RUNS=false
+```
+
+Then start the API and worker separately:
+
+```powershell
+uvicorn app.main:app --reload
+python -m app.worker
+```
+
+In this mode, `POST /runs` only writes a pending run. The worker polls pending runs and executes Harness subprocesses.
+
 ## Verification
 
 ```powershell
