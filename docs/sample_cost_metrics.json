@@ -1,0 +1,13 @@
+{
+  "total_runs": 1,
+  "total_tokens": 15,
+  "estimated_cost_usd": 0.001,
+  "by_model": [
+    {
+      "model": "scripted",
+      "runs": 1,
+      "tokens": 15,
+      "estimated_cost_usd": 0.001
+    }
+  ]
+}

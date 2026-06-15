@@ -4,6 +4,36 @@
 
 FastAPI backend for service-wrapping OpenAgent Harness. The Harness executes coding-agent tasks; this Platform layer manages tasks, async runs, state, artifacts, idempotency, rate limiting, cache policy, and cost metrics.
 
+## Demo Evidence
+
+| Area | Current Evidence |
+|---|---:|
+| Automated tests | `20 passed` |
+| Run states | `pending`, `running`, `pass`, `fail`, `timeout`, `cancelled` |
+| Artifact endpoints | 5 run artifacts + cost metrics |
+| Cost fields | prompt/completion/total tokens + estimated USD |
+| Local safety | SQLite + in-memory cache/rate-limit fallback |
+| Real-call guard | env + request double opt-in |
+
+Reference Harness smoke:
+
+| Task | Result | Tests | Estimated Cost |
+|---|---|---:|---:|
+| HTTP 429 retry fix | pass | 4/4 | ~$0.00066 |
+
+```mermaid
+flowchart LR
+    U["POST /runs"] --> I["Idempotency-Key"]
+    I --> R["Rate limit"]
+    R --> P["pending run"]
+    P --> W["worker / BackgroundTasks"]
+    W --> H["OpenAgent Harness"]
+    H --> A["artifacts"]
+    A --> S["status + usage"]
+    S --> M["/metrics/cost"]
+    A --> Q["report / patch / scorecard / trace"]
+```
+
 ## Scope
 
 ```text
@@ -111,7 +141,13 @@ In this mode, `POST /runs` only writes a pending run. The worker polls pending r
 pytest -q
 ```
 
-The tests cover health, idempotent run creation, artifact serving, path sandboxing, rate limiting, cache jitter, cost parsing, and metrics aggregation.
+Expected result:
+
+```text
+20 passed
+```
+
+The tests cover health, idempotent run creation, artifact serving, path sandboxing, rate limiting, cache jitter, cost parsing, timeout classification, worker execution, and metrics aggregation.
 
 ## Cache Backend
 
@@ -120,5 +156,6 @@ With `ENABLE_REDIS=false`, cache and rate limiting use in-memory fallbacks for l
 ## Interview Materials
 
 - `docs/architecture_diagram.md`
+- `docs/demo_evidence.md`
 - `docs/demo_walkthrough.md`
 - `docs/interview_playbook_cn.md`
