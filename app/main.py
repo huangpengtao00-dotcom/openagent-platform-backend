@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
 from .artifacts import ArtifactNotFound, UnsafeArtifactPath, read_json, resolve_artifact
-from .cache import MemoryCache
+from .cache import build_cache
 from .config import load_settings
 from .db import SessionLocal, get_db, init_db
 from .harness_client import HarnessClient
@@ -20,7 +20,13 @@ from .services import artifact_links, cancel_run, cost_metrics, create_run, crea
 settings = load_settings()
 settings.harness_runs_root.mkdir(parents=True, exist_ok=True)
 limiter = build_rate_limiter(settings.enable_redis, settings.redis_url, settings.rate_limit_runs_per_minute)
-cache = MemoryCache(settings.cache_default_ttl_seconds, settings.cache_negative_ttl_seconds, settings.cache_ttl_jitter_seconds)
+cache = build_cache(
+    settings.enable_redis,
+    settings.redis_url,
+    settings.cache_default_ttl_seconds,
+    settings.cache_negative_ttl_seconds,
+    settings.cache_ttl_jitter_seconds,
+)
 harness_client = HarnessClient(settings.harness_root, settings.harness_python, settings.harness_pythonpath)
 
 app = FastAPI(title="OpenAgent Platform Backend", version="0.2.0")

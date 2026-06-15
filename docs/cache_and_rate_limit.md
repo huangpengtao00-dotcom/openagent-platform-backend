@@ -1,6 +1,6 @@
 # Cache And Rate Limit
 
-The backend includes an in-memory implementation plus a Redis counter implementation. If `ENABLE_REDIS=true` but Redis is unavailable, the service falls back to memory so local demos do not break.
+The backend includes in-memory implementations plus Redis-backed rate limit and cache implementations. If `ENABLE_REDIS=true` but Redis is unavailable, the service falls back to memory so local demos do not break.
 
 ## Rate Limit
 
@@ -23,3 +23,7 @@ The cache exposes per-key locks for mutex backfill. A future Redis version can u
 ## Cache Avalanche
 
 TTL jitter is applied as `base_ttl + random(0, jitter)` so hot keys do not all expire at exactly the same second.
+
+## Redis Cache
+
+Redis cache stores JSON-encoded values with `SETEX`, uses the same negative-cache TTL for empty values, and exposes a prefixed lock key for future mutex backfill around hot artifact metadata.

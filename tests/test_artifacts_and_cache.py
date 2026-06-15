@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.artifacts import UnsafeArtifactPath, parse_usage_from_artifacts, resolve_artifact
-from app.cache import MemoryCache
+from app.cache import MemoryCache, RedisCache, build_cache
 from app.harness_client import HarnessClient
 
 
@@ -65,3 +65,54 @@ def test_harness_client_passes_timeout_and_allow_flag(tmp_path: Path):
     assert "--allow-llm-calls" in captured["args"]
     assert captured["timeout"] == 30
     assert result.status == "pass"
+
+
+class FakeRedisCacheClient:
+    def __init__(self):
+        self.values = {}
+        self.expire_calls = []
+        self.locks = {}
+
+    def get(self, key):
+        return self.values.get(key)
+
+    def setex(self, key, ttl, value):
+        self.values[key] = value
+        self.expire_calls.append((key, ttl))
+
+    def lock(self, key, timeout):
+        self.locks[key] = timeout
+        return f"lock:{key}:{timeout}"
+
+
+def test_redis_cache_round_trips_json_and_negative_entries():
+    fake = FakeRedisCacheClient()
+    cache = RedisCache(fake, default_ttl=10, negative_ttl=2, jitter=0)
+
+    cache.set("run:1", {"status": "pass"})
+    cache.set("run:404", "__missing__", negative=True)
+
+    assert cache.get("run:1") == {"status": "pass"}
+    assert cache.get("run:404") == "__missing__"
+    assert fake.expire_calls == [("run:1", 10), ("run:404", 2)]
+
+
+def test_redis_cache_lock_uses_prefixed_key():
+    fake = FakeRedisCacheClient()
+    cache = RedisCache(fake, default_ttl=10, negative_ttl=2, jitter=0)
+
+    lock = cache.lock_for("run:1")
+
+    assert lock == "lock:lock:run:1:10"
+
+
+def test_cache_factory_falls_back_to_memory_when_redis_unavailable():
+    cache = build_cache(
+        enable_redis=True,
+        redis_url="redis://127.0.0.1:1/0",
+        default_ttl=10,
+        negative_ttl=2,
+        jitter=0,
+    )
+
+    assert isinstance(cache, MemoryCache)
