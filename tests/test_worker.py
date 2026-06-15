@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -8,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db import Base
 from app.harness_client import HarnessRunResult
 from app.models import Run, RunStatus, Task
+from app.services import execute_run
 from app.worker import Worker, process_next_run
 
 
@@ -70,3 +72,24 @@ def test_worker_run_once_returns_false_when_no_pending_runs(tmp_path: Path):
     worker = Worker(session_factory=session_factory, harness_client=fake, harness_runs_root=tmp_path / "artifacts")
 
     assert worker.run_once() is False
+
+
+def test_execute_run_marks_subprocess_timeout_as_timeout(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    run_id = seed_pending_run(session_factory)
+
+    class TimeoutHarnessClient:
+        def run_task(self, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="openagent_harness", timeout=1)
+
+    class Settings:
+        harness_runs_root = tmp_path / "artifacts"
+
+    db = session_factory()
+    execute_run(db, run_id, TimeoutHarnessClient(), Settings())
+    run = db.get(Run, run_id)
+
+    assert run.status == RunStatus.timeout.value
+    assert run.failure_type == "timeout"
+    assert "timed out" in run.error_message
+    db.close()
