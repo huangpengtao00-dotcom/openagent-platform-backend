@@ -1,10 +1,12 @@
 # Cache And Rate Limit
 
-The backend includes a small in-memory implementation that mirrors Redis-backed production behavior.
+The backend includes an in-memory implementation plus a Redis counter implementation. If `ENABLE_REDIS=true` but Redis is unavailable, the service falls back to memory so local demos do not break.
 
 ## Rate Limit
 
 `POST /runs` is limited per user with `RATE_LIMIT_RUNS_PER_MINUTE`. This protects real DeepSeek runs from accidental repeated submissions and cost spikes.
+
+Set `RATE_LIMIT_RUNS_PER_MINUTE=0` to disable the limiter for local development.
 
 ## Idempotency
 
@@ -21,4 +23,3 @@ The cache exposes per-key locks for mutex backfill. A future Redis version can u
 ## Cache Avalanche
 
 TTL jitter is applied as `base_ttl + random(0, jitter)` so hot keys do not all expire at exactly the same second.
-

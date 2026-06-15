@@ -13,13 +13,13 @@ from .config import load_settings
 from .db import SessionLocal, get_db, init_db
 from .harness_client import HarnessClient
 from .models import Run, Task
-from .rate_limit import MemoryRateLimiter, RateLimitExceeded
+from .rate_limit import RateLimitExceeded, build_rate_limiter
 from .schemas import CostMetricsOut, RunCreate, RunOut, TaskCreate, TaskOut
-from .services import artifact_links, cost_metrics, create_run, create_task, execute_run
+from .services import artifact_links, cancel_run, cost_metrics, create_run, create_task, execute_run
 
 settings = load_settings()
 settings.harness_runs_root.mkdir(parents=True, exist_ok=True)
-limiter = MemoryRateLimiter(settings.rate_limit_runs_per_minute)
+limiter = build_rate_limiter(settings.enable_redis, settings.redis_url, settings.rate_limit_runs_per_minute)
 cache = MemoryCache(settings.cache_default_ttl_seconds, settings.cache_negative_ttl_seconds, settings.cache_ttl_jitter_seconds)
 harness_client = HarnessClient(settings.harness_root, settings.harness_python, settings.harness_pythonpath)
 
@@ -66,7 +66,16 @@ def post_run(
     except RateLimitExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     if run.status == "pending":
-        background_tasks.add_task(_execute_run_in_new_session, run.id)
+        _schedule_run(background_tasks, run.id)
+    return _run_out(run)
+
+
+@app.post("/runs/{run_id}/cancel", response_model=RunOut)
+def post_cancel_run(run_id: int, db: Session = Depends(get_db)) -> RunOut:
+    try:
+        run = cancel_run(db, run_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _run_out(run)
 
 
@@ -125,6 +134,10 @@ def _execute_run_in_new_session(run_id: int) -> None:
         db.close()
 
 
+def _schedule_run(background_tasks: BackgroundTasks, run_id: int) -> None:
+    background_tasks.add_task(_execute_run_in_new_session, run_id)
+
+
 def _run_out(run: Run) -> RunOut:
     usage = None
     if run.usage:
@@ -141,6 +154,7 @@ def _run_out(run: Run) -> RunOut:
         status=run.status,
         mode=run.mode,
         model=run.model,
+        timeout_seconds=run.timeout_seconds,
         harness_run_id=run.harness_run_id,
         artifacts_dir=run.artifacts_dir,
         failure_type=run.failure_type,

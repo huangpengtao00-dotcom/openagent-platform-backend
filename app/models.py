@@ -42,6 +42,7 @@ class Run(Base):
     mode: Mapped[str] = mapped_column(String(20), default="local")
     model: Mapped[str] = mapped_column(String(120), default="scripted")
     allow_llm_calls: Mapped[bool] = mapped_column(default=False)
+    timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     harness_run_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     artifacts_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -67,4 +68,3 @@ class Usage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     run: Mapped[Run] = relationship(back_populates="usage")
-

@@ -26,6 +26,7 @@ class RunCreate(BaseModel):
     mode: str = "local"
     model: str = "scripted"
     allow_llm_calls: bool = False
+    timeout_seconds: int | None = Field(default=None, ge=1, le=3600)
 
 
 class UsageOut(BaseModel):
@@ -44,6 +45,7 @@ class RunOut(BaseModel):
     status: str
     mode: str
     model: str
+    timeout_seconds: int | None = None
     harness_run_id: str | None = None
     artifacts_dir: str | None = None
     failure_type: str | None = None

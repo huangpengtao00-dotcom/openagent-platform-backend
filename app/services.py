@@ -49,6 +49,7 @@ def create_run(
         mode=body.mode,
         model=body.model or settings.harness_default_model,
         allow_llm_calls=body.allow_llm_calls,
+        timeout_seconds=body.timeout_seconds,
     )
     db.add(run)
     db.commit()
@@ -73,6 +74,7 @@ def execute_run(db: Session, run_id: int, client: HarnessClient, settings: Setti
             model=run.model,
             runs_root=str(settings.harness_runs_root),
             allow_llm_calls=run.allow_llm_calls,
+            timeout_seconds=run.timeout_seconds,
         )
         run.harness_run_id = result.harness_run_id
         run.artifacts_dir = str(result.artifacts_dir)
@@ -132,3 +134,14 @@ def artifact_links(run: Run) -> dict[str, str]:
         "trace": f"{base}/trace",
     }
 
+
+def cancel_run(db: Session, run_id: int) -> Run:
+    run = db.get(Run, run_id)
+    if not run:
+        raise LookupError("run not found")
+    if run.status in {RunStatus.pending.value, RunStatus.running.value}:
+        run.status = RunStatus.cancelled.value
+        run.finished_at = datetime.utcnow()
+        db.commit()
+        db.refresh(run)
+    return run

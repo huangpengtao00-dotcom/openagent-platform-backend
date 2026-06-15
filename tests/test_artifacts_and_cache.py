@@ -7,6 +7,7 @@ import pytest
 
 from app.artifacts import UnsafeArtifactPath, parse_usage_from_artifacts, resolve_artifact
 from app.cache import MemoryCache
+from app.harness_client import HarnessClient
 
 
 def test_parse_usage_from_trace(tmp_path: Path):
@@ -38,3 +39,29 @@ def test_cache_ttl_jitter_and_negative_cache():
     cache.set("missing", "__missing__", negative=True)
     assert cache.get("missing") == "__missing__"
 
+
+def test_harness_client_passes_timeout_and_allow_flag(tmp_path: Path):
+    captured = {}
+
+    def fake_run(args, cwd, env, text, capture_output, timeout, check):
+        captured["args"] = args
+        captured["timeout"] = timeout
+        run_dir = tmp_path / "runs" / "run-1"
+        run_dir.mkdir(parents=True)
+        (run_dir / "gate.json").write_text('{"status":"pass"}', encoding="utf-8")
+        (run_dir / "scorecard.json").write_text('{"status":"pass"}', encoding="utf-8")
+        (run_dir / "trace.jsonl").write_text("", encoding="utf-8")
+
+        class Completed:
+            returncode = 0
+            stdout = f"run_id=run-1\nstatus=pass\nartifacts={run_dir}\n"
+            stderr = ""
+
+        return Completed()
+
+    client = HarnessClient(tmp_path, "python", command_runner=fake_run)
+    result = client.run_task("task.json", "api", "deepseek-v4-flash", str(tmp_path / "runs"), True, timeout_seconds=30)
+
+    assert "--allow-llm-calls" in captured["args"]
+    assert captured["timeout"] == 30
+    assert result.status == "pass"

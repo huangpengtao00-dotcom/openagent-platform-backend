@@ -49,6 +49,7 @@ $run = @{
   mode = "local"
   model = "scripted"
   allow_llm_calls = $false
+  timeout_seconds = 120
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/runs -Headers @{"Idempotency-Key"="demo-001"} -ContentType "application/json" -Body $run
@@ -64,7 +65,10 @@ GET /runs/{run_id}/scorecard
 GET /runs/{run_id}/test-result
 GET /runs/{run_id}/trace
 GET /metrics/cost
+POST /runs/{run_id}/cancel
 ```
+
+`POST /runs/{run_id}/cancel` is intended for pending local-worker runs. In production, running-process cancellation should be handled by the external worker layer.
 
 ## Real DeepSeek Mode
 
@@ -76,6 +80,8 @@ Real calls require both:
 
 This double opt-in prevents accidental spending. Do not commit `.env`.
 
+For manual demos, keep total real API smoke spending under `DEMO_COST_BUDGET_CNY`. A single `deepseek-v4-flash` realistic task is expected to be tiny, but check `/metrics/cost` after every real run.
+
 ## Verification
 
 ```powershell
@@ -83,4 +89,3 @@ pytest -q
 ```
 
 The tests cover health, idempotent run creation, artifact serving, path sandboxing, rate limiting, cache jitter, cost parsing, and metrics aggregation.
-

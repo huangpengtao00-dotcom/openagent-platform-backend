@@ -4,6 +4,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from .artifacts import parse_usage_from_artifacts, read_json
 
@@ -18,10 +19,17 @@ class HarnessRunResult:
 
 
 class HarnessClient:
-    def __init__(self, harness_root: Path, python: str, pythonpath: str = "src") -> None:
+    def __init__(
+        self,
+        harness_root: Path,
+        python: str,
+        pythonpath: str = "src",
+        command_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    ) -> None:
         self.harness_root = Path(harness_root).resolve()
         self.python = python
         self.pythonpath = pythonpath
+        self.command_runner = command_runner
 
     def run_task(
         self,
@@ -30,6 +38,7 @@ class HarnessClient:
         model: str,
         runs_root: str,
         allow_llm_calls: bool,
+        timeout_seconds: int | None = None,
     ) -> HarnessRunResult:
         runs_root_path = Path(runs_root).resolve()
         runs_root_path.mkdir(parents=True, exist_ok=True)
@@ -52,13 +61,13 @@ class HarnessClient:
         env = os.environ.copy()
         extra_pythonpath = str((self.harness_root / self.pythonpath).resolve())
         env["PYTHONPATH"] = extra_pythonpath + os.pathsep + env.get("PYTHONPATH", "")
-        completed = subprocess.run(
+        completed = self.command_runner(
             args,
             cwd=self.harness_root,
             env=env,
             text=True,
             capture_output=True,
-            timeout=None,
+            timeout=timeout_seconds,
             check=False,
         )
         if completed.returncode != 0:
@@ -94,4 +103,3 @@ def _latest_child(root: Path) -> Path:
     if not children:
         raise FileNotFoundError(f"no harness run dir under {root}")
     return max(children, key=lambda item: item.stat().st_mtime)
-

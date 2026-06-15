@@ -15,3 +15,4 @@ The Harness writes artifacts such as `report.html`, `patch.diff`, `scorecard.jso
 
 Cost is parsed from `trace.jsonl` when it contains `observation.usage`, falling back to `api_agent_run.json` if present.
 
+Real API demos should be deliberately small. The current project budget convention is `DEMO_COST_BUDGET_CNY=5`; use `/metrics/cost` after each real run to confirm cumulative spend.

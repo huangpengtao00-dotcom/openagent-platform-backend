@@ -11,7 +11,7 @@ class FakeHarnessClient:
         self.run_dir = run_dir
         self.calls = 0
 
-    def run_task(self, task_spec_path: str, mode: str, model: str, runs_root: str, allow_llm_calls: bool):
+    def run_task(self, task_spec_path: str, mode: str, model: str, runs_root: str, allow_llm_calls: bool, **kwargs):
         from app.harness_client import HarnessRunResult
 
         self.calls += 1
@@ -71,3 +71,23 @@ def test_cost_metrics(client, tmp_path, monkeypatch):
     assert metrics["total_tokens"] == 15
     assert metrics["estimated_cost_usd"] == 0.001
 
+
+def test_api_run_requires_server_side_real_call_switch(client):
+    task_id = create_task(client)
+    res = client.post(
+        "/runs",
+        json={"task_id": task_id, "mode": "api", "model": "deepseek-v4-flash", "allow_llm_calls": True},
+    )
+    assert res.status_code == 400
+    assert "disabled" in res.json()["detail"]
+
+
+def test_cancel_pending_run(client, monkeypatch):
+    task_id = create_task(client)
+    monkeypatch.setattr("app.main._schedule_run", lambda background_tasks, run_id: None)
+    created = client.post("/runs", json={"task_id": task_id}, headers={"Idempotency-Key": "cancel"}).json()
+
+    res = client.post(f"/runs/{created['run_id']}/cancel")
+
+    assert res.status_code == 200
+    assert res.json()["status"] == "cancelled"
