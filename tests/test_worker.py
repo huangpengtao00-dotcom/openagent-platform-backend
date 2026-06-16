@@ -93,3 +93,25 @@ def test_execute_run_marks_subprocess_timeout_as_timeout(tmp_path: Path):
     assert run.failure_type == "timeout"
     assert "timed out" in run.error_message
     db.close()
+
+
+def test_process_next_run_marks_missing_task_as_failed(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    db = session_factory()
+    run = Run(task_id=999, status=RunStatus.pending.value, mode="local", model="scripted")
+    db.add(run)
+    db.commit()
+    run_id = run.id
+    db.close()
+
+    fake = FakeHarnessClient(tmp_path / "artifacts" / "worker-run")
+    processed = process_next_run(session_factory, fake, harness_runs_root=tmp_path / "artifacts")
+
+    assert processed == run_id
+    db = session_factory()
+    run = db.get(Run, run_id)
+    assert run.status == RunStatus.failed.value
+    assert run.failure_type == "task_not_found"
+    assert run.finished_at is not None
+    assert fake.calls == 0
+    db.close()

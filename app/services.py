@@ -64,6 +64,11 @@ def execute_run(db: Session, run_id: int, client: HarnessClient, settings: Setti
         return
     task = db.get(Task, run.task_id)
     if not task:
+        run.status = RunStatus.failed.value
+        run.failure_type = "task_not_found"
+        run.error_message = "task not found"
+        run.finished_at = datetime.utcnow()
+        db.commit()
         return
     run.status = RunStatus.running.value
     run.started_at = datetime.utcnow()
