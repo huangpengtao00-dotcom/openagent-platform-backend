@@ -116,6 +116,14 @@ http://127.0.0.1:5173
 
 The Vite dev server proxies `/api/*` to `http://127.0.0.1:8000/*`, so start the FastAPI backend separately when using live API actions. Without the backend, the console still opens with demo data for presentation.
 
+One-command local demo:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_demo.ps1
+```
+
+This starts the FastAPI backend and the Vite Console in separate terminals, opens `http://127.0.0.1:5173`, and keeps real model calls disabled with `ALLOW_REAL_LLM_CALLS=false`.
+
 The live Console run page includes evaluation profiles:
 
 - `Safe scripted retry-429`: zero-cost baseline.
