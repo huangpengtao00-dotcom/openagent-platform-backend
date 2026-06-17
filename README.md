@@ -8,19 +8,27 @@ FastAPI backend for service-wrapping OpenAgent Harness. The Harness executes cod
 
 | Area | Current Evidence |
 |---|---:|
-| Automated tests | `25 passed` |
+| Automated tests | backend `31 passed`, frontend `13 passed` |
 | Run states | `pending`, `running`, `pass`, `fail`, `timeout`, `cancelled` |
 | Artifact endpoints | 5 run artifacts + cost metrics |
 | Cost fields | prompt/completion/total tokens + estimated USD |
 | Local safety | SQLite + in-memory cache/rate-limit fallback |
 | Real-call guard | env + request double opt-in |
 | Process cancel | run status + Harness subprocess termination |
+| Evaluation UI | safe scripted profile + real DeepSeek profiles |
+
+Highest-priority interview evidence:
+
+1. Console screenshot after a real API run: status, mode, model, harness id, and usage.
+2. `GET /runs/{id}` JSON for the same run: timestamps, tokens, cost, and artifact links.
+3. `/runs/{id}/report` or `/scorecard` screenshot: inspectable agent output.
+4. `/metrics/cost` screenshot or JSON: model-level run, token, and cost totals.
 
 Reference Harness smoke:
 
-| Task | Result | Tests | Estimated Cost |
-|---|---|---:|---:|
-| HTTP 429 retry fix | pass | 4/4 | ~$0.00066 |
+| Task | Profile | Result | Tokens | Estimated Cost |
+|---|---|---|---:|---:|
+| HTTP 429 retry fix | `Real DeepSeek retry-429` | pass | 4159 | `$0.00064274` |
 
 ```mermaid
 flowchart LR
@@ -107,6 +115,12 @@ http://127.0.0.1:5173
 ```
 
 The Vite dev server proxies `/api/*` to `http://127.0.0.1:8000/*`, so start the FastAPI backend separately when using live API actions. Without the backend, the console still opens with demo data for presentation.
+
+The live Console run page includes evaluation profiles:
+
+- `Safe scripted retry-429`: zero-cost baseline.
+- `Real DeepSeek retry-429`: low-cost real API smoke for a compact bugfix task.
+- `Real DeepSeek config-loader`: second realistic task so the demo is not hard-coded to one example.
 
 ## API Smoke
 
@@ -244,7 +258,7 @@ pytest -q
 Expected result:
 
 ```text
-25 passed
+31 passed
 ```
 
 The tests cover health, idempotent run creation, artifact serving, path sandboxing, rate limiting, cache jitter, cost parsing, timeout classification, worker execution, and metrics aggregation.
@@ -256,6 +270,7 @@ With `ENABLE_REDIS=false`, cache and rate limiting use in-memory fallbacks for l
 ## Interview Materials
 
 - `docs/architecture_diagram.md`
+- `docs/coding_agent_evaluation.md`
 - `docs/demo_evidence.md`
 - `docs/demo_walkthrough.md`
 - `docs/one_command_demo.md`

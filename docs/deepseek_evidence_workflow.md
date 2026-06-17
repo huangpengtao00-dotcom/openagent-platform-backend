@@ -21,13 +21,25 @@ The script writes JSON evidence under `evidence/deepseek-YYYYMMDD-HHMMSS/`, whic
 
 ## Screenshots To Capture
 
-Capture these five screenshots for the interview evidence pack:
+Capture these screenshots first; they are the highest-value interview evidence:
 
-1. Terminal output from `scripts/run_deepseek_evidence.ps1`.
-2. `03-run-created.json`, showing `mode=api`, `model=deepseek-v4-flash`, and `allow_llm_calls=true`.
-3. `04-run-latest.json`, showing final run status and artifact links.
-4. Browser page: `/runs/{run_id}/report`.
-5. Browser/API response: `/metrics/cost`, showing tokens and estimated USD.
+1. Console run page after selecting `Real DeepSeek retry-429`, showing `mode=api`, `model=deepseek-v4-flash`, `allow_llm_calls=true`, final `pass`, harness id, and usage.
+2. `GET /runs/{run_id}` JSON, showing final status, timestamps, token usage, estimated USD, and artifact links.
+3. Browser page: `/runs/{run_id}/report` or API response from `/runs/{run_id}/scorecard`.
+4. Browser/API response: `/metrics/cost`, showing model-level runs, tokens, and estimated USD.
+5. Console profile selector, showing the safe scripted baseline and real API profiles.
+6. Optional terminal output from `scripts/run_deepseek_evidence.ps1`.
+
+Latest verified local example from 2026-06-17:
+
+| Field | Value |
+|---|---|
+| Run | `2` |
+| Status | `pass` |
+| Model | `deepseek-v4-flash` |
+| Harness run id | `deepseek-real-retry-429-32b3023d` |
+| Tokens | `4159` |
+| Estimated cost | `$0.00064274` |
 
 ## Interview Answer
 
