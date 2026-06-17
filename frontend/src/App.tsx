@@ -16,14 +16,14 @@ import {
   Square,
   TerminalSquare,
 } from "lucide-react";
-import { cancelRun, createRun, getArtifact, getCostMetrics, getRun } from "./api";
+import { cancelRun, createRun, createTask, getArtifact, getCostMetrics, getRun } from "./api";
 import { demoArtifact, demoCost, demoEvidenceSections, demoRun, getDemoArtifact, type ArtifactKind } from "./mockData";
+import { buildEvaluationRequest, evaluationProfiles } from "./runProfiles";
 import {
   dataSourceLabel,
   formatCurrency,
   formatTokens,
   runTimeline,
-  stableRunKey,
   statusTone,
   type CostMetrics,
   type DataSource,
@@ -59,9 +59,11 @@ function App() {
   const [notice, setNotice] = useState(initialNotice);
   const [busy, setBusy] = useState(false);
   const [dataSource, setDataSource] = useState<DataSource>("sample");
+  const [profileId, setProfileId] = useState(evaluationProfiles[0].id);
 
   const selectedTone = statusTone(run.status);
   const timeline = runTimeline(run.status);
+  const selectedProfile = evaluationProfiles.find((profile) => profile.id === profileId) ?? evaluationProfiles[0];
   const architecture = useMemo(
     () => [
       ["Harness", "执行面", "任务执行、代码修改、测试、trace、报告"],
@@ -88,21 +90,16 @@ function App() {
   }
 
   async function handleCreateRun() {
-    const taskId = Number(runIdInput || run.task_id);
+    const request = buildEvaluationRequest(selectedProfile);
     await runLive(
-      () =>
-        createRun(
-          {
-            task_id: taskId,
-            mode: "local",
-            model: "scripted",
-            allow_llm_calls: false,
-            timeout_seconds: 120,
-          },
-          stableRunKey(taskId, "local", "scripted"),
-        ),
+      async () => {
+        const task = await createTask(request.task);
+        const createdRun = await createRun({ task_id: task.task_id, ...request.run }, request.idempotencyKey);
+        setRunIdInput(String(createdRun.run_id));
+        return createdRun;
+      },
       setRun,
-      "已创建或复用安全本地运行：mode=local，model=scripted，allow_llm_calls=false。",
+      `${selectedProfile.label} started: mode=${request.run.mode}, model=${request.run.model}, allow_llm_calls=${request.run.allow_llm_calls}.`,
     );
   }
 
@@ -241,9 +238,28 @@ function App() {
             <div className="panel">
               <div className="panel-title">
                 <Play size={18} />
-                <h3>运行控制</h3>
+                <h3>评测控制</h3>
               </div>
-              <p className="muted">默认复用已有 task_id 创建安全本地运行：mode=local，model=scripted，allow_llm_calls=false。</p>
+              <p className="muted">选择一个 Harness 任务样例。scripted 是零成本基线；api 会触发真实 DeepSeek 评测，仍受后端双重开关保护。</p>
+              <div className="form-row">
+                <label htmlFor="eval-profile">Evaluation profile</label>
+                <select
+                  id="eval-profile"
+                  value={profileId}
+                  onChange={(event) => setProfileId(event.target.value as typeof profileId)}
+                >
+                  {evaluationProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className={`profile-summary ${selectedProfile.mode}`}>
+                <strong>{selectedProfile.mode === "api" ? "真实 API 评测" : "安全 scripted 评测"}</strong>
+                <span>{selectedProfile.description}</span>
+                <em>{selectedProfile.budgetHint}</em>
+              </div>
               <div className="form-row">
                 <label htmlFor="run-id">Task / Run ID</label>
                 <input id="run-id" value={runIdInput} onChange={(event) => setRunIdInput(event.target.value)} />
@@ -251,7 +267,7 @@ function App() {
               <div className="button-row">
                 <button className="primary-btn" onClick={handleCreateRun} disabled={busy} type="button">
                   <Play size={16} />
-                  创建或复用运行
+                  启动所选评测
                 </button>
                 <button className="ghost-btn" onClick={handleRefreshRun} disabled={busy} type="button">
                   <RefreshCw size={16} />
