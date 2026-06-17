@@ -205,7 +205,7 @@ function App() {
               </div>
             </div>
 
-            <MetricCard label="自动化测试" value="25 passed" icon={CheckCircle2} tone="success" />
+            <MetricCard label="自动化测试" value="31 + 13 passed" icon={CheckCircle2} tone="success" />
             <MetricCard label="运行状态" value="6 states" icon={GitBranch} tone="active" />
             <MetricCard label="进程取消" value="enabled" icon={PauseCircle} tone="warning" />
             <MetricCard label="成本保护" value="double opt-in" icon={ShieldCheck} tone="queued" />
