@@ -118,6 +118,14 @@ The Vite dev server proxies `/api/*` to `http://127.0.0.1:8000/*`, so start the 
 
 One-command local demo:
 
+Double-click:
+
+```text
+Start_OpenAgent_Demo.bat
+```
+
+Or run from PowerShell:
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_demo.ps1
 ```

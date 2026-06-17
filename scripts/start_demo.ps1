@@ -18,6 +18,7 @@ function Resolve-HarnessRoot {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
     $workspaceRoot = (Resolve-Path -LiteralPath (Join-Path $repoRoot "..")).Path
     $candidates = @(
+        (Join-Path $workspaceRoot "02_OpenAgent_Harness"),
         (Join-Path $workspaceRoot "Interview-Project-Bundle-20260617-233344\02_OpenAgent_Harness"),
         (Join-Path $workspaceRoot "简历项目整理_20260617\01_OpenAgent_Harness"),
         (Join-Path $workspaceRoot "OpenAgent-Harness-v1-final"),
