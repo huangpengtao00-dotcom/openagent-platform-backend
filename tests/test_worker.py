@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db import Base
 from app.harness_client import HarnessRunResult
 from app.models import Run, RunStatus, Task
-from app.services import execute_run
+from app.services import cancel_run, execute_run
 from app.worker import Worker, process_next_run
 
 
@@ -95,6 +95,71 @@ def test_execute_run_marks_subprocess_timeout_as_timeout(tmp_path: Path):
     db.close()
 
 
+def test_cancel_running_run_terminates_registered_process(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    run_id = seed_pending_run(session_factory)
+    db = session_factory()
+    run = db.get(Run, run_id)
+    run.status = RunStatus.running.value
+    db.commit()
+
+    class FakeProcessRegistry:
+        def __init__(self) -> None:
+            self.cancelled = []
+
+        def cancel(self, run_id: int) -> bool:
+            self.cancelled.append(run_id)
+            return True
+
+    registry = FakeProcessRegistry()
+    cancelled = cancel_run(db, run_id, registry)
+
+    assert cancelled.status == RunStatus.cancelled.value
+    assert registry.cancelled == [run_id]
+    db.close()
+
+
+def test_execute_run_does_not_overwrite_cancelled_run_after_harness_returns(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    run_id = seed_pending_run(session_factory)
+
+    class CancellingHarnessClient:
+        def __init__(self, session_factory):
+            self.session_factory = session_factory
+
+        def run_task(self, **kwargs):
+            db = self.session_factory()
+            run = db.get(Run, run_id)
+            run.status = RunStatus.cancelled.value
+            db.commit()
+            db.close()
+            return HarnessRunResult(
+                harness_run_id="late-success",
+                artifacts_dir=tmp_path / "artifacts" / "late-success",
+                status="pass",
+                failure_type=None,
+                usage={
+                    "model": "scripted",
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "estimated_cost_usd": 0.0,
+                },
+            )
+
+    class Settings:
+        harness_runs_root = tmp_path / "artifacts"
+
+    db = session_factory()
+    execute_run(db, run_id, CancellingHarnessClient(session_factory), Settings())
+    run = db.get(Run, run_id)
+
+    assert run.status == RunStatus.cancelled.value
+    assert run.harness_run_id is None
+    assert run.finished_at is not None
+    db.close()
+
+
 def test_process_next_run_marks_missing_task_as_failed(tmp_path: Path):
     session_factory = make_session(tmp_path)
     db = session_factory()
@@ -114,4 +179,37 @@ def test_process_next_run_marks_missing_task_as_failed(tmp_path: Path):
     assert run.failure_type == "task_not_found"
     assert run.finished_at is not None
     assert fake.calls == 0
+    db.close()
+
+
+def test_execute_run_normalizes_string_none_failure_type(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    run_id = seed_pending_run(session_factory)
+
+    class NoneStringHarnessClient:
+        def run_task(self, **kwargs):
+            return HarnessRunResult(
+                harness_run_id="none-string-run",
+                artifacts_dir=tmp_path / "artifacts" / "none-string-run",
+                status="fail",
+                failure_type="None",
+                usage={
+                    "model": "scripted",
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "estimated_cost_usd": 0.0,
+                },
+            )
+
+    class Settings:
+        harness_runs_root = tmp_path / "artifacts"
+
+    db = session_factory()
+    execute_run(db, run_id, NoneStringHarnessClient(), Settings())
+    run = db.get(Run, run_id)
+
+    assert run.status == RunStatus.failed.value
+    assert run.failure_type is None
+    assert run.error_message == "harness failed"
     db.close()

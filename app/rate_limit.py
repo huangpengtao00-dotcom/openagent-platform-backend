@@ -6,6 +6,8 @@ from typing import Protocol
 
 import redis
 
+from .time import utc_now
+
 
 class RateLimitExceeded(Exception):
     pass
@@ -26,7 +28,7 @@ class MemoryRateLimiter:
     def check(self, key: str, now: datetime | None = None) -> None:
         if self.disabled:
             return
-        now = now or datetime.utcnow()
+        now = now or utc_now()
         bucket = self.buckets[key]
         cutoff = now - self.window
         while bucket and bucket[0] <= cutoff:
