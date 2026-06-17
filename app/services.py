@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -12,10 +13,17 @@ from .harness_client import HarnessClient
 from .models import Run, RunStatus, Task, Usage
 from .rate_limit import MemoryRateLimiter
 from .schemas import CostMetricsOut, CostModelOut, RunCreate, TaskCreate
+from .time import utc_now
 
 
-def create_task(db: Session, body: TaskCreate) -> Task:
-    task = Task(name=body.name, description=body.description, harness_task_path=body.harness_task_path)
+class ProcessCanceller(Protocol):
+    def cancel(self, run_id: int) -> bool:
+        ...
+
+
+def create_task(db: Session, body: TaskCreate, settings: Settings) -> Task:
+    task_spec_path = _resolve_harness_task_path(body.harness_task_path, settings.harness_root)
+    task = Task(name=body.name, description=body.description, harness_task_path=str(task_spec_path))
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -62,16 +70,18 @@ def execute_run(db: Session, run_id: int, client: HarnessClient, settings: Setti
     run = db.get(Run, run_id)
     if not run:
         return
+    if run.status == RunStatus.cancelled.value:
+        return
     task = db.get(Task, run.task_id)
     if not task:
         run.status = RunStatus.failed.value
         run.failure_type = "task_not_found"
         run.error_message = "task not found"
-        run.finished_at = datetime.utcnow()
+        run.finished_at = utc_now()
         db.commit()
         return
     run.status = RunStatus.running.value
-    run.started_at = datetime.utcnow()
+    run.started_at = utc_now()
     db.commit()
     try:
         result = client.run_task(
@@ -81,24 +91,41 @@ def execute_run(db: Session, run_id: int, client: HarnessClient, settings: Setti
             runs_root=str(settings.harness_runs_root),
             allow_llm_calls=run.allow_llm_calls,
             timeout_seconds=run.timeout_seconds,
+            run_id=run.id,
+            should_cancel=lambda: _run_is_cancelled(db, run),
         )
+        db.refresh(run)
+        if run.status == RunStatus.cancelled.value:
+            return
         run.harness_run_id = result.harness_run_id
         run.artifacts_dir = str(result.artifacts_dir)
         run.status = RunStatus.passed.value if result.status == "pass" else RunStatus.failed.value
-        run.failure_type = result.failure_type
-        run.error_message = None if run.status == RunStatus.passed.value else result.failure_type
+        failure_type = _normalize_failure_type(result.failure_type)
+        run.failure_type = failure_type
+        run.error_message = None if run.status == RunStatus.passed.value else (failure_type or "harness failed")
         upsert_usage(db, run, result.usage)
     except subprocess.TimeoutExpired as exc:
+        db.refresh(run)
+        if run.status == RunStatus.cancelled.value:
+            return
         run.status = RunStatus.timeout.value
         run.failure_type = "timeout"
         run.error_message = str(exc)
     except Exception as exc:
+        db.refresh(run)
+        if run.status == RunStatus.cancelled.value:
+            return
         run.status = RunStatus.failed.value
         run.failure_type = type(exc).__name__
         run.error_message = str(exc)
     finally:
-        run.finished_at = datetime.utcnow()
-        db.commit()
+        if run.status == RunStatus.cancelled.value:
+            if run.finished_at is None:
+                run.finished_at = utc_now()
+                db.commit()
+        else:
+            run.finished_at = utc_now()
+            db.commit()
 
 
 def upsert_usage(db: Session, run: Run, data: dict) -> Usage:
@@ -110,6 +137,31 @@ def upsert_usage(db: Session, run: Run, data: dict) -> Usage:
     usage.estimated_cost_usd = float(data.get("estimated_cost_usd") or 0.0)
     db.add(usage)
     return usage
+
+
+def _resolve_harness_task_path(task_path: str, harness_root: Path) -> Path:
+    root = Path(harness_root).resolve()
+    candidate = Path(task_path)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    candidate = candidate.resolve()
+    if candidate != root and root not in candidate.parents:
+        raise PermissionError(f"harness_task_path must stay inside allowed harness root: {root}")
+    return candidate
+
+
+def _normalize_failure_type(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "null", "nil"}:
+        return None
+    return text
+
+
+def _run_is_cancelled(db: Session, run: Run) -> bool:
+    db.refresh(run)
+    return run.status == RunStatus.cancelled.value
 
 
 def cost_metrics(db: Session, date_from: datetime | None = None, date_to: datetime | None = None) -> CostMetricsOut:
@@ -145,13 +197,15 @@ def artifact_links(run: Run) -> dict[str, str]:
     }
 
 
-def cancel_run(db: Session, run_id: int) -> Run:
+def cancel_run(db: Session, run_id: int, process_canceller: ProcessCanceller | None = None) -> Run:
     run = db.get(Run, run_id)
     if not run:
         raise LookupError("run not found")
     if run.status in {RunStatus.pending.value, RunStatus.running.value}:
+        if process_canceller is not None:
+            process_canceller.cancel(run_id)
         run.status = RunStatus.cancelled.value
-        run.finished_at = datetime.utcnow()
+        run.finished_at = utc_now()
         db.commit()
         db.refresh(run)
     return run

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -23,7 +24,7 @@ class TaskOut(BaseModel):
 
 class RunCreate(BaseModel):
     task_id: int
-    mode: str = "local"
+    mode: Literal["local", "api"] = "local"
     model: str = "scripted"
     allow_llm_calls: bool = False
     timeout_seconds: int | None = Field(default=None, ge=1, le=3600)

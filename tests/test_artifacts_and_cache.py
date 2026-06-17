@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -65,6 +67,48 @@ def test_harness_client_passes_timeout_and_allow_flag(tmp_path: Path):
     assert "--allow-llm-calls" in captured["args"]
     assert captured["timeout"] == 30
     assert result.status == "pass"
+
+
+def test_harness_client_loads_harness_root_env_for_subprocess(tmp_path: Path):
+    captured = {}
+    (tmp_path / ".env").write_text("DEEPSEEK_API_KEY=local-test-key\nOPENAGENT_BASE_URL=https://example.test\n", encoding="utf-8")
+
+    def fake_run(args, cwd, env, text, capture_output, timeout, check):
+        captured["env"] = env
+        run_dir = tmp_path / "runs" / "run-1"
+        run_dir.mkdir(parents=True)
+        (run_dir / "gate.json").write_text('{"status":"pass"}', encoding="utf-8")
+        (run_dir / "scorecard.json").write_text('{"status":"pass"}', encoding="utf-8")
+        (run_dir / "trace.jsonl").write_text("", encoding="utf-8")
+
+        class Completed:
+            returncode = 0
+            stdout = f"run_id=run-1\nstatus=pass\nartifacts={run_dir}\n"
+            stderr = ""
+
+        return Completed()
+
+    client = HarnessClient(tmp_path, "python", command_runner=fake_run)
+    client.run_task("task.json", "api", "deepseek-v4-flash", str(tmp_path / "runs"), True)
+
+    assert captured["env"]["DEEPSEEK_API_KEY"] == "local-test-key"
+    assert captured["env"]["OPENAGENT_BASE_URL"] == "https://example.test"
+
+
+def test_harness_client_kills_process_when_cancellation_probe_trips(tmp_path: Path):
+    client = HarnessClient(tmp_path, sys.executable)
+    started = time.monotonic()
+
+    with pytest.raises(RuntimeError, match="cancelled"):
+        client._run_command(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            env={},
+            timeout_seconds=30,
+            run_id=123,
+            should_cancel=lambda: time.monotonic() - started > 0.2,
+        )
+
+    assert time.monotonic() - started < 5
 
 
 class FakeRedisCacheClient:

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .config import load_settings
 from .db import SessionLocal, init_db
 from .harness_client import HarnessClient
+from .process_manager import ProcessRegistry
 from .models import Run, RunStatus
 from .services import execute_run
 
@@ -59,7 +60,12 @@ class Worker:
 def build_default_worker() -> Worker:
     settings = load_settings()
     init_db()
-    client = HarnessClient(settings.harness_root, settings.harness_python, settings.harness_pythonpath)
+    client = HarnessClient(
+        settings.harness_root,
+        settings.harness_python,
+        settings.harness_pythonpath,
+        process_registry=ProcessRegistry(),
+    )
     return Worker(session_factory=SessionLocal, harness_client=client, harness_runs_root=settings.harness_runs_root)
 
 

@@ -47,7 +47,7 @@ Local verification:
 
 ```text
 pytest -q
-20 passed
+25 passed
 ```
 
 Reference real Harness smoke:

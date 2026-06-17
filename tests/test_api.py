@@ -43,6 +43,31 @@ def test_health(client):
     assert client.get("/health").json()["status"] == "ok"
 
 
+def test_create_task_rejects_path_outside_harness_root(client, tmp_path):
+    outside = tmp_path / "outside" / "task.json"
+
+    res = client.post("/tasks", json={"name": "escape", "harness_task_path": str(outside)})
+
+    assert res.status_code == 400
+    assert "allowed harness root" in res.json()["detail"]
+
+
+def test_create_task_stores_relative_path_inside_harness_root(client, tmp_path):
+    res = client.post("/tasks", json={"name": "retry", "harness_task_path": "benchmarks/retry/task.json"})
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["harness_task_path"] == str((tmp_path / "harness" / "benchmarks" / "retry" / "task.json").resolve())
+
+
+def test_post_run_rejects_unknown_mode(client):
+    task_id = create_task(client)
+
+    res = client.post("/runs", json={"task_id": task_id, "mode": "dry-run"})
+
+    assert res.status_code == 422
+
+
 def test_run_idempotency_and_artifacts(client, tmp_path, monkeypatch):
     fake = FakeHarnessClient(tmp_path / "harness_runs" / "fake-run")
     monkeypatch.setattr("app.main.harness_client", fake)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from .config import load_settings
 from .db import SessionLocal, get_db, init_db
 from .harness_client import HarnessClient
 from .models import Run, Task
+from .process_manager import ProcessRegistry
 from .rate_limit import RateLimitExceeded, build_rate_limiter
 from .schemas import CostMetricsOut, RunCreate, RunOut, TaskCreate, TaskOut
 from .services import artifact_links, cancel_run, cost_metrics, create_run, create_task, execute_run
@@ -27,15 +29,22 @@ cache = build_cache(
     settings.cache_negative_ttl_seconds,
     settings.cache_ttl_jitter_seconds,
 )
-harness_client = HarnessClient(settings.harness_root, settings.harness_python, settings.harness_pythonpath)
+process_registry = ProcessRegistry()
+harness_client = HarnessClient(
+    settings.harness_root,
+    settings.harness_python,
+    settings.harness_pythonpath,
+    process_registry=process_registry,
+)
 
-app = FastAPI(title="OpenAgent Platform Backend", version="0.2.0")
-app.state.session_factory = SessionLocal
-
-
-@app.on_event("startup")
-def startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     init_db()
+    yield
+
+
+app = FastAPI(title="OpenAgent Platform Backend", version="0.2.0", lifespan=lifespan)
+app.state.session_factory = SessionLocal
 
 
 @app.get("/health")
@@ -45,7 +54,10 @@ def health() -> dict:
 
 @app.post("/tasks", response_model=TaskOut)
 def post_task(body: TaskCreate, db: Session = Depends(get_db)) -> TaskOut:
-    task = create_task(db, body)
+    try:
+        task = create_task(db, body, settings)
+    except PermissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return TaskOut(
         task_id=task.id,
         name=task.name,
@@ -79,7 +91,7 @@ def post_run(
 @app.post("/runs/{run_id}/cancel", response_model=RunOut)
 def post_cancel_run(run_id: int, db: Session = Depends(get_db)) -> RunOut:
     try:
-        run = cancel_run(db, run_id)
+        run = cancel_run(db, run_id, process_registry)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _run_out(run)

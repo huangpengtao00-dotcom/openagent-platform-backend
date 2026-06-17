@@ -24,7 +24,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(bind=engine)
     monkeypatch.setattr(settings, "harness_runs_root", runs_root)
+    monkeypatch.setattr(settings, "harness_root", tmp_path / "harness")
     runs_root.mkdir(parents=True, exist_ok=True)
+    settings.harness_root.mkdir(parents=True, exist_ok=True)
 
     def override_db():
         db = TestingSession()

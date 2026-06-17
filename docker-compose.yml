@@ -1,18 +1,47 @@
 services:
   api:
     build: .
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      AUTO_START_RUNS: "false"
+      ENABLE_REDIS: "true"
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: sqlite:////app/data/openagent_platform.db
+      HARNESS_ROOT: /harness
+      HARNESS_RUNS_ROOT: /app/artifacts/harness_runs
+      ALLOW_REAL_LLM_CALLS: "false"
     depends_on:
       - redis
     volumes:
       - ./artifacts:/app/artifacts
+      - ./data:/app/data
+      - ${HOST_HARNESS_ROOT:-../OpenAgent-Harness-v1-final}:/harness:ro
+
+  worker:
+    build: .
+    command: sh -c "alembic upgrade head && python -m app.worker"
+    env_file:
+      - .env
+    environment:
+      AUTO_START_RUNS: "false"
+      ENABLE_REDIS: "true"
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: sqlite:////app/data/openagent_platform.db
+      HARNESS_ROOT: /harness
+      HARNESS_RUNS_ROOT: /app/artifacts/harness_runs
+      ALLOW_REAL_LLM_CALLS: "false"
+    depends_on:
+      - redis
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+      - ${HOST_HARNESS_ROOT:-../OpenAgent-Harness-v1-final}:/harness:ro
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-
