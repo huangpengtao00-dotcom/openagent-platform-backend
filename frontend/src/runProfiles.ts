@@ -1,7 +1,7 @@
 import type { CreateRunInput, CreateTaskInput } from "./api";
 
 export type EvaluationProfile = {
-  id: "scripted-retry-429" | "api-retry-429" | "api-config-loader";
+  id: "local-demo" | "deepseek-api" | "retry-context";
   label: string;
   taskPath: string;
   mode: CreateRunInput["mode"];
@@ -14,37 +14,37 @@ export type EvaluationProfile = {
 
 export const evaluationProfiles: EvaluationProfile[] = [
   {
-    id: "scripted-retry-429",
-    label: "Safe scripted retry-429",
+    id: "local-demo",
+    label: "scripted baseline",
     taskPath: "benchmarks_realistic/retry-429-real/task.json",
     mode: "local",
     model: "scripted",
     allowLlmCalls: false,
     timeoutSeconds: 120,
-    description: "Zero-cost baseline. Exercises the same Platform -> Harness artifact path without calling a model.",
-    budgetHint: "0 tokens, safe for repeated demos",
+    description: "Offline zero-cost baseline. It exercises the full Platform -> Harness -> pytest -> report/patch/scorecard chain.",
+    budgetHint: "0 tokens, stable for live interview demos.",
   },
   {
-    id: "api-retry-429",
-    label: "Real DeepSeek retry-429",
+    id: "deepseek-api",
+    label: "DeepSeek API",
     taskPath: "examples/deepseek_real_task.json",
     mode: "api",
     model: "deepseek-v4-flash",
     allowLlmCalls: true,
     timeoutSeconds: 120,
-    description: "Real model evaluation for the HTTP 429 retry bug. Good interview demo because the patch is small and easy to explain.",
-    budgetHint: "Typical smoke cost is well below 1 CNY",
+    description: "Real model path. Requires ALLOW_REAL_LLM_CALLS=true and a configured DeepSeek-compatible key.",
+    budgetHint: "Real calls are capped by the backend 1 CNY budget gate.",
   },
   {
-    id: "api-config-loader",
-    label: "Real DeepSeek config-loader",
-    taskPath: "benchmarks_realistic/config-loader-real/task.json",
+    id: "retry-context",
+    label: "retry with context",
+    taskPath: "benchmarks_realistic/retry-429-real/task.json",
     mode: "api",
     model: "deepseek-v4-flash",
     allowLlmCalls: true,
-    timeoutSeconds: 120,
-    description: "A second real task example so the demo is not hard-coded to one scripted benchmark.",
-    budgetHint: "Use once for variety; still guarded by backend double opt-in",
+    timeoutSeconds: 180,
+    description: "Failure-aware retry profile. Use the Retry with context button after a failed run so the dashboard compares first attempt and retry.",
+    budgetHint: "Same real-call budget gate; retry metrics are folded into the Evaluation Dashboard.",
   },
 ];
 
@@ -69,4 +69,8 @@ export function buildEvaluationRequest(profile: EvaluationProfile): EvaluationRe
     },
     idempotencyKey: `console-eval-${profile.id}`,
   };
+}
+
+export function buildFreshIdempotencyKey(prefix: string, now = Date.now()): string {
+  return `${prefix}-${now}`;
 }

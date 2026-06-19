@@ -1,6 +1,6 @@
 param(
     [string]$Server = "http://127.0.0.1:8000",
-    [string]$TaskPath = "../OpenAgent-Harness-v1-final/examples/deepseek_real_task.json",
+    [string]$TaskPath = "examples/deepseek_real_task.json",
     [string]$Model = "deepseek-v4-flash",
     [int]$TimeoutSeconds = 180,
     [switch]$Live,

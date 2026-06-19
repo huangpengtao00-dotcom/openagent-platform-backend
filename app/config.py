@@ -21,6 +21,26 @@ def _int(name: str, default: int) -> int:
     return int(value)
 
 
+def _float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    return float(value)
+
+
+def _default_harness_root() -> Path:
+    backend_root = Path(__file__).resolve().parents[1]
+    bundle_root = backend_root.parent
+    candidates = [
+        bundle_root / "02_OpenAgent_Harness",
+        bundle_root / "OpenAgent-Harness",
+    ]
+    for candidate in candidates:
+        if (candidate / "pyproject.toml").exists() and (candidate / "src" / "openagent_harness" / "cli.py").exists():
+            return candidate.resolve()
+    return (bundle_root / "02_OpenAgent_Harness").resolve()
+
+
 @dataclass
 class Settings:
     app_env: str
@@ -38,6 +58,8 @@ class Settings:
     cache_ttl_jitter_seconds: int
     allow_real_llm_calls: bool
     auto_start_runs: bool
+    real_api_budget_limit_cny: float
+    usd_to_cny_rate: float
 
 
 def load_settings() -> Settings:
@@ -47,7 +69,7 @@ def load_settings() -> Settings:
         database_url=os.getenv("DATABASE_URL", "sqlite:///./openagent_platform.db"),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         enable_redis=_bool("ENABLE_REDIS", False),
-        harness_root=Path(os.getenv("HARNESS_ROOT", "../OpenAgent-Harness-v1-final")).resolve(),
+        harness_root=Path(os.getenv("HARNESS_ROOT")).resolve() if os.getenv("HARNESS_ROOT") else _default_harness_root(),
         harness_python=os.getenv("HARNESS_PYTHON", "python"),
         harness_pythonpath=os.getenv("HARNESS_PYTHONPATH", "src"),
         harness_runs_root=Path(os.getenv("HARNESS_RUNS_ROOT", "./artifacts/harness_runs")).resolve(),
@@ -56,6 +78,8 @@ def load_settings() -> Settings:
         cache_default_ttl_seconds=_int("CACHE_DEFAULT_TTL_SECONDS", 300),
         cache_negative_ttl_seconds=_int("CACHE_NEGATIVE_TTL_SECONDS", 60),
         cache_ttl_jitter_seconds=_int("CACHE_TTL_JITTER_SECONDS", 60),
-        allow_real_llm_calls=_bool("ALLOW_REAL_LLM_CALLS", False),
+        allow_real_llm_calls=_bool("ALLOW_REAL_LLM_CALLS", True),
         auto_start_runs=_bool("AUTO_START_RUNS", True),
+        real_api_budget_limit_cny=_float("REAL_API_BUDGET_LIMIT_CNY", 1.0),
+        usd_to_cny_rate=_float("USD_TO_CNY_RATE", 7.25),
     )

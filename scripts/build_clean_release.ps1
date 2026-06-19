@@ -28,7 +28,7 @@ $excludedDirs = @(
     "runs_deepseek_real",
     "artifacts",
     "test_artifacts",
-    ".codex_tmp"
+    ".*_tmp"
 )
 
 $excludedFiles = @(
@@ -94,7 +94,7 @@ pip install -e .[dev]
 copy .env.example .env
 $env:HARNESS_ROOT="..\harness"
 $env:HARNESS_RUNS_ROOT="artifacts\harness_runs"
-$env:ALLOW_REAL_LLM_CALLS="false"
+$env:ALLOW_REAL_LLM_CALLS="true"
 python -m pytest -q
 uvicorn app.main:app --reload
 ```
@@ -113,7 +113,7 @@ Open:
 http://127.0.0.1:5173
 ```
 
-Scripted mode is the default safe demo path. API mode requires explicit local secrets and double opt-in; do not put real API keys into this release folder.
+Scripted mode remains the stable zero-cost demo profile. The backend LLM gate defaults to true, while API mode still requires explicit request opt-in, local provider secrets, and the budget gate; do not put real API keys into this release folder.
 '@
     $template.Replace("__TITLE__", $Title).Replace("__MODE__", $Mode) |
         Set-Content -LiteralPath (Join-Path $Path "README_RELEASE.md") -Encoding UTF8

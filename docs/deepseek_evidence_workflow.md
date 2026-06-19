@@ -13,7 +13,7 @@ Use this only for a manual, low-cost proof run. The automation and default Docke
 ## Run
 
 ```powershell
-$env:DEEPSEEK_API_KEY="sk-..."
+$env:DEEPSEEK_API_KEY="<your_deepseek_api_key>"
 .\scripts\run_deepseek_evidence.ps1 -Live -ConfirmSpend
 ```
 
@@ -43,4 +43,4 @@ Latest verified local example from 2026-06-17:
 
 ## Interview Answer
 
-The project uses a double opt-in for real model calls: the server must set `ALLOW_REAL_LLM_CALLS=true`, and the request must set `allow_llm_calls=true`. This prevents accidental spending during local demos and scheduled maintenance.
+Real model calls are enabled by the backend default gate `ALLOW_REAL_LLM_CALLS=true`, but they still require API-mode request opt-in, a local provider key, and the budget gate. This keeps the interview demo honest without reverting to a hidden disabled-by-default path.

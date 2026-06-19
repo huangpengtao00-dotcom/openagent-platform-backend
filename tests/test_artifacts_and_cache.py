@@ -69,6 +69,61 @@ def test_harness_client_passes_timeout_and_allow_flag(tmp_path: Path):
     assert result.status == "pass"
 
 
+def test_harness_client_resolves_run_dir_from_run_id_when_artifacts_missing(tmp_path: Path):
+    def fake_run(args, cwd, env, text, capture_output, timeout, check):
+        run_dir = tmp_path / "runs" / "run-1"
+        run_dir.mkdir(parents=True)
+        (run_dir / "gate.json").write_text('{"status":"pass"}', encoding="utf-8")
+        (run_dir / "scorecard.json").write_text('{"status":"pass"}', encoding="utf-8")
+        (run_dir / "trace.jsonl").write_text("", encoding="utf-8")
+
+        class Completed:
+            returncode = 0
+            stdout = "run_id=run-1\nstatus=pass\n"
+            stderr = ""
+
+        return Completed()
+
+    client = HarnessClient(tmp_path, "python", command_runner=fake_run)
+    result = client.run_task("task.json", "local", "scripted", str(tmp_path / "runs"), False)
+
+    assert result.harness_run_id == "run-1"
+    assert result.artifacts_dir == (tmp_path / "runs" / "run-1").resolve()
+
+
+def test_harness_client_rejects_stdout_without_run_identity(tmp_path: Path):
+    def fake_run(args, cwd, env, text, capture_output, timeout, check):
+        class Completed:
+            returncode = 0
+            stdout = "status=pass\n"
+            stderr = ""
+
+        return Completed()
+
+    client = HarnessClient(tmp_path, "python", command_runner=fake_run)
+
+    with pytest.raises(RuntimeError, match="artifacts or run_id"):
+        client.run_task("task.json", "local", "scripted", str(tmp_path / "runs"), False)
+
+
+def test_harness_client_rejects_artifacts_outside_runs_root(tmp_path: Path):
+    outside = tmp_path / "outside-run"
+    outside.mkdir()
+
+    def fake_run(args, cwd, env, text, capture_output, timeout, check):
+        class Completed:
+            returncode = 0
+            stdout = f"run_id=run-1\nstatus=pass\nartifacts={outside}\n"
+            stderr = ""
+
+        return Completed()
+
+    client = HarnessClient(tmp_path, "python", command_runner=fake_run)
+
+    with pytest.raises(RuntimeError, match="escaped runs root"):
+        client.run_task("task.json", "local", "scripted", str(tmp_path / "runs"), False)
+
+
 def test_harness_client_loads_harness_root_env_for_subprocess(tmp_path: Path):
     captured = {}
     (tmp_path / ".env").write_text("DEEPSEEK_API_KEY=local-test-key\nOPENAGENT_BASE_URL=https://example.test\n", encoding="utf-8")
@@ -93,6 +148,19 @@ def test_harness_client_loads_harness_root_env_for_subprocess(tmp_path: Path):
 
     assert captured["env"]["DEEPSEEK_API_KEY"] == "local-test-key"
     assert captured["env"]["OPENAGENT_BASE_URL"] == "https://example.test"
+
+
+def test_report_endpoint_adds_browser_security_headers(client, tmp_path, monkeypatch):
+    from tests.test_api import FakeHarnessClient, create_task
+
+    monkeypatch.setattr("app.main.harness_client", FakeHarnessClient(tmp_path / "harness_runs" / "fake-run"))
+    task_id = create_task(client)
+    created = client.post("/runs", json={"task_id": task_id}, headers={"Idempotency-Key": "headers"}).json()
+
+    response = client.get(f"/runs/{created['run_id']}/report")
+
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "default-src 'none'" in response.headers["content-security-policy"]
 
 
 def test_harness_client_kills_process_when_cancellation_probe_trips(tmp_path: Path):

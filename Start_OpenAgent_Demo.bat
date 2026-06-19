@@ -6,7 +6,7 @@ cd /d "%~dp0"
 
 echo.
 echo Starting OpenAgent demo...
-echo This safe demo keeps real model calls disabled.
+echo Backend LLM gate defaults to enabled; API calls still require request opt-in, key, and budget.
 echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start_demo.ps1"

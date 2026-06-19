@@ -17,12 +17,12 @@ copy .env.example .env
 Set `HOST_HARNESS_ROOT` in `.env` to your local Harness checkout. Example:
 
 ```env
-HOST_HARNESS_ROOT=C:/Users/hpt/Desktop/备份/OpenAgent-Harness-v1-final
-ALLOW_REAL_LLM_CALLS=false
+HOST_HARNESS_ROOT=../02_OpenAgent_Harness
+ALLOW_REAL_LLM_CALLS=true
 AUTO_START_RUNS=false
 ```
 
-Keep `ALLOW_REAL_LLM_CALLS=false` for normal demos. Do not put `.env` in git.
+Keep `ALLOW_REAL_LLM_CALLS=true` as the backend default. Real API runs still require request-side `allow_llm_calls=true`, a local provider key, and the budget gate. Do not put `.env` in git.
 
 ## 2. Start everything
 
@@ -40,4 +40,4 @@ http://127.0.0.1:8000/docs
 
 In this mode, `POST /runs` only creates a pending row. The separate worker process consumes it and calls the Harness CLI. This demonstrates the production-shaped architecture better than FastAPI `BackgroundTasks`.
 
-Real DeepSeek calls are still disabled unless you deliberately set `ALLOW_REAL_LLM_CALLS=true` and submit a request with `allow_llm_calls=true`.
+Real DeepSeek calls still require deliberate API-profile submission with `allow_llm_calls=true`, a configured local provider key, and the budget gate.

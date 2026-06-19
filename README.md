@@ -8,27 +8,87 @@ FastAPI backend for service-wrapping OpenAgent Harness. The Harness executes cod
 
 | Area | Current Evidence |
 |---|---:|
-| Automated tests | backend `31 passed`, frontend `13 passed` |
+| Automated tests | backend `52 passed`, frontend `22 passed` |
 | Run states | `pending`, `running`, `pass`, `fail`, `timeout`, `cancelled` |
 | Artifact endpoints | 5 run artifacts + cost metrics |
 | Cost fields | prompt/completion/total tokens + estimated USD |
 | Local safety | SQLite + in-memory cache/rate-limit fallback |
-| Real-call guard | env + request double opt-in |
+| Real-call guard | default backend gate + request opt-in + local key + budget cap |
 | Process cancel | run status + Harness subprocess termination |
-| Evaluation UI | safe scripted profile + real DeepSeek profiles |
+| Evaluation UI | scripted baseline + guarded DeepSeek + retry profile |
 
 Highest-priority interview evidence:
 
-1. Console screenshot after a real API run: status, mode, model, harness id, and usage.
-2. `GET /runs/{id}` JSON for the same run: timestamps, tokens, cost, and artifact links.
+1. Console screenshot after a `scripted baseline` run: status, mode, model, harness id, score, and artifact links.
+2. `GET /runs/{id}` JSON for the same run: timestamps, status, and artifact links.
 3. `/runs/{id}/report` or `/scorecard` screenshot: inspectable agent output.
-4. `/metrics/cost` screenshot or JSON: model-level run, token, and cost totals.
+4. `/evaluation/summary` screenshot or JSON: profile comparison, task-level table, failure distribution, and cost totals.
 
 Reference Harness smoke:
 
 | Task | Profile | Result | Tokens | Estimated Cost |
 |---|---|---|---:|---:|
-| HTTP 429 retry fix | `Real DeepSeek retry-429` | pass | 4159 | `$0.00064274` |
+| HTTP 429 retry fix | `scripted baseline` | pass | 0 | `$0.00000` |
+
+## Quantitative Evaluation Evidence
+
+The console now leads with an Evaluation Dashboard instead of a single run view. The goal is to compare execution strategies on the same benchmark surface:
+
+| Profile | Purpose | Cost posture |
+|---|---|---|
+| `scripted baseline` | deterministic local zero-cost baseline | no model call |
+| `DeepSeek API` | real model evidence for the same agent workflow | guarded by `ALLOW_REAL_LLM_CALLS` and 1 CNY cap |
+| `retry with context` | failure-aware retry after inspecting prior artifacts | guarded by the same real-call budget |
+
+Dashboard metrics:
+
+```json
+{
+  "total": 10,
+  "passed": 10,
+  "failed": 0,
+  "pass_rate": 1.0,
+  "avg_score": 96.5,
+  "total_patch_lines": 182,
+  "total_cost_usd": 0.00066,
+  "failure_types": {
+    "None": 10,
+    "NoPatch": 0,
+    "TestFailed": 0,
+    "ScopeViolation": 0
+  }
+}
+```
+
+Live API:
+
+```text
+GET /evaluation/summary
+```
+
+The response includes:
+
+- `summary`: benchmark totals, pass rate, average score, patch size, changed files, tests, failure distribution, tokens, cost, and duration.
+- `profiles`: side-by-side comparison for local baseline, DeepSeek API, and retry strategy.
+- `tasks`: one row per benchmark/run with `task_id`, `profile`, `status`, `score`, `patch_lines`, `changed_files`, `tests_passed`, `cost`, `failure_type`, and `report_link`.
+- `retry_comparisons`: first attempt status, retry status, fail-to-pass flag, retry cost, retry patch lines, and failure-type changes.
+
+Reproduce locally:
+
+```powershell
+.\Start_OpenAgent_Demo.bat
+```
+
+Then open the console and click:
+
+1. `Evaluation` -> `Refresh dashboard`
+2. `Run Control` -> profile `scripted baseline` -> `Start evaluation`
+3. Return to `Evaluation` -> `Refresh dashboard`
+4. Optional only after preflight: `DeepSeek API` or `Retry with context`
+
+Interview line:
+
+> I do not just show one successful agent run. I run different execution strategies against the same benchmark surface and compare pass rate, cost, patch size, changed files, failure type, trace, scorecard, and report links.
 
 ```mermaid
 flowchart LR
@@ -130,13 +190,13 @@ Or run from PowerShell:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_demo.ps1
 ```
 
-This starts the FastAPI backend and the Vite Console in separate terminals, opens `http://127.0.0.1:5173`, and keeps real model calls disabled with `ALLOW_REAL_LLM_CALLS=false`.
+This starts the FastAPI backend and the Vite Console in separate terminals, opens `http://127.0.0.1:5173`, and enables guarded real model calls with `ALLOW_REAL_LLM_CALLS=true`. A provider key such as `DEEPSEEK_API_KEY` is still required, and the backend budget gate remains active.
 
 The live Console run page includes evaluation profiles:
 
-- `Safe scripted retry-429`: zero-cost baseline.
-- `Real DeepSeek retry-429`: low-cost real API smoke for a compact bugfix task.
-- `Real DeepSeek config-loader`: second realistic task so the demo is not hard-coded to one example.
+- `scripted baseline`: zero-cost baseline for stable interview demos.
+- `DeepSeek API`: guarded real model path, disabled unless server and request both opt in.
+- `retry with context`: creates a retry run from the current failed run and folds it into the evaluation dashboard.
 
 ## API Smoke
 
@@ -144,7 +204,7 @@ The live Console run page includes evaluation profiles:
 $task = @{
   name = "retry-429-real"
   description = "Fix HTTP 429 retry logic"
-  harness_task_path = "../OpenAgent-Harness-v1-final/benchmarks_realistic/retry-429-real/task.json"
+  harness_task_path = "benchmarks_realistic/retry-429-real/task.json"
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/tasks -ContentType "application/json" -Body $task
@@ -193,9 +253,9 @@ Real calls require both:
 2. Platform env sets `ALLOW_REAL_LLM_CALLS=true`
 3. request body sets `"mode": "api"` and `"allow_llm_calls": true`
 
-This double opt-in prevents accidental spending. Do not commit `.env`.
+Real spending is bounded by request opt-in, a local provider key, the backend budget gate, rate limiting, and timeout handling. Do not commit `.env`.
 
-For manual demos, keep total real API smoke spending under `DEMO_COST_BUDGET_CNY`. A single `deepseek-v4-flash` realistic task is expected to be tiny, but check `/metrics/cost` after every real run.
+For manual demos, keep total real API smoke spending under `REAL_API_BUDGET_LIMIT_CNY` (default `1.0` CNY). A single `deepseek-v4-flash` realistic task is expected to be tiny, but check `/metrics/cost` and `/evaluation/summary` after every real run.
 
 ## Scripted Mode vs API Mode
 
@@ -274,10 +334,10 @@ pytest -q
 Expected result:
 
 ```text
-31 passed
+52 passed
 ```
 
-The tests cover health, idempotent run creation, artifact serving, path sandboxing, rate limiting, cache jitter, cost parsing, timeout classification, worker execution, and metrics aggregation.
+The tests cover health, idempotent run creation, artifact serving, path sandboxing, rate limiting, cache jitter, cost parsing, timeout classification, worker execution, evaluation summary aggregation, default Harness path discovery, and metrics aggregation.
 
 ## Cache Backend
 

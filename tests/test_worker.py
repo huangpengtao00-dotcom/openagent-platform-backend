@@ -213,3 +213,26 @@ def test_execute_run_normalizes_string_none_failure_type(tmp_path: Path):
     assert run.failure_type is None
     assert run.error_message == "harness failed"
     db.close()
+
+
+def test_execute_run_ignores_non_pending_run(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    run_id = seed_pending_run(session_factory)
+    db = session_factory()
+    run = db.get(Run, run_id)
+    run.status = RunStatus.passed.value
+    run.harness_run_id = "already-done"
+    db.commit()
+
+    fake = FakeHarnessClient(tmp_path / "artifacts" / "should-not-run")
+
+    class Settings:
+        harness_runs_root = tmp_path / "artifacts"
+
+    execute_run(db, run_id, fake, Settings())
+    db.refresh(run)
+
+    assert fake.calls == 0
+    assert run.status == RunStatus.passed.value
+    assert run.harness_run_id == "already-done"
+    db.close()

@@ -76,7 +76,7 @@ class HarnessClient:
             raise RuntimeError(output or f"harness exited with {completed.returncode}")
 
         fields = _parse_stdout_fields(completed.stdout)
-        run_dir = Path(fields.get("artifacts") or _latest_child(runs_root_path)).resolve()
+        run_dir = _resolve_run_dir_from_stdout(fields, runs_root_path)
         gate = read_json(run_dir / "gate.json") if (run_dir / "gate.json").exists() else {}
         scorecard = read_json(run_dir / "scorecard.json") if (run_dir / "scorecard.json").exists() else {}
         status = str(scorecard.get("status") or gate.get("status") or fields.get("status") or "fail")
@@ -195,8 +195,15 @@ def _load_harness_env(harness_root: Path) -> dict[str, str]:
     return {key: value for key, value in values.items() if key and value is not None}
 
 
-def _latest_child(root: Path) -> Path:
-    children = [item for item in root.iterdir() if item.is_dir()]
-    if not children:
-        raise FileNotFoundError(f"no harness run dir under {root}")
-    return max(children, key=lambda item: item.stat().st_mtime)
+def _resolve_run_dir_from_stdout(fields: dict[str, str], runs_root: Path) -> Path:
+    if fields.get("artifacts"):
+        run_dir = Path(fields["artifacts"]).resolve()
+    elif fields.get("run_id"):
+        run_dir = (runs_root / fields["run_id"]).resolve()
+    else:
+        raise RuntimeError("harness output did not include artifacts or run_id")
+    if runs_root != run_dir and runs_root not in run_dir.parents:
+        raise RuntimeError(f"harness artifacts path escaped runs root: {run_dir}")
+    if not run_dir.is_dir():
+        raise FileNotFoundError(f"harness run dir not found: {run_dir}")
+    return run_dir

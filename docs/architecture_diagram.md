@@ -12,7 +12,7 @@ flowchart LR
     BG --> HC["HarnessClient subprocess"]
     W --> HC
     HC --> H["OpenAgent Harness"]
-    H --> LLM["DeepSeek / OpenAI-compatible API<br/>double opt-in only"]
+    H --> LLM["DeepSeek / OpenAI-compatible API<br/>request opt-in + key + budget gate"]
     H --> A["Artifacts<br/>report.html / patch.diff / scorecard.json / trace.jsonl"]
     A --> API
     API --> M["/metrics/cost"]

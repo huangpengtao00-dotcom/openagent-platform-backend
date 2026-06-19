@@ -13,13 +13,13 @@ services:
       DATABASE_URL: sqlite:////app/data/openagent_platform.db
       HARNESS_ROOT: /harness
       HARNESS_RUNS_ROOT: /app/artifacts/harness_runs
-      ALLOW_REAL_LLM_CALLS: "false"
+      ALLOW_REAL_LLM_CALLS: "true"
     depends_on:
       - redis
     volumes:
       - ./artifacts:/app/artifacts
       - ./data:/app/data
-      - ${HOST_HARNESS_ROOT:-../OpenAgent-Harness-v1-final}:/harness:ro
+      - ${HOST_HARNESS_ROOT:-../02_OpenAgent_Harness}:/harness:ro
 
   worker:
     build: .
@@ -33,13 +33,13 @@ services:
       DATABASE_URL: sqlite:////app/data/openagent_platform.db
       HARNESS_ROOT: /harness
       HARNESS_RUNS_ROOT: /app/artifacts/harness_runs
-      ALLOW_REAL_LLM_CALLS: "false"
+      ALLOW_REAL_LLM_CALLS: "true"
     depends_on:
       - redis
     volumes:
       - ./artifacts:/app/artifacts
       - ./data:/app/data
-      - ${HOST_HARNESS_ROOT:-../OpenAgent-Harness-v1-final}:/harness:ro
+      - ${HOST_HARNESS_ROOT:-../02_OpenAgent_Harness}:/harness:ro
 
   redis:
     image: redis:7-alpine
