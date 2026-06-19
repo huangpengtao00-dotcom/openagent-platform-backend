@@ -25,7 +25,7 @@ frontend/dist/
 .env
 .env.*
 !.env.example
-.codex_tmp/
+.*_tmp/
 OpenAgent-Release-Bundles/
 *.log
 *.zip

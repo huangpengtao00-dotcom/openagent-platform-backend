@@ -41,6 +41,14 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
             capture_output=True,
             check=False,
         )
+        deadline = time.monotonic() + 1.0
+        while process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if process.poll() is None:
+            process.kill()
+            deadline = time.monotonic() + 1.0
+            while process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
         return
     process.terminate()
     deadline = time.monotonic() + 1.0
@@ -48,3 +56,6 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
         time.sleep(0.05)
     if process.poll() is None:
         process.kill()
+        deadline = time.monotonic() + 1.0
+        while process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)

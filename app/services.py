@@ -1,24 +1,72 @@
 from __future__ import annotations
 
 import subprocess
+import json
+import re
+import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from .config import Settings
 from .harness_client import HarnessClient
 from .models import Run, RunStatus, Task, Usage
 from .rate_limit import MemoryRateLimiter
-from .schemas import CostMetricsOut, CostModelOut, RunCreate, TaskCreate
+from .schemas import CostMetricsOut, CostModelOut, CustomTaskCreate, RetryRunCreate, RunCreate, TaskCreate
 from .time import utc_now
+
+
+_ALLOWED_CUSTOM_ACCEPTANCE_COMMANDS = {
+    ("pytest",),
+    ("pytest", "-q"),
+    ("python", "-m", "pytest"),
+    ("python", "-m", "pytest", "-q"),
+    ("python3", "-m", "pytest"),
+    ("python3", "-m", "pytest", "-q"),
+    ("py", "-m", "pytest"),
+    ("py", "-m", "pytest", "-q"),
+}
+
+
+class IdempotencyConflict(ValueError):
+    pass
 
 
 class ProcessCanceller(Protocol):
     def cancel(self, run_id: int) -> bool:
         ...
+
+
+def create_custom_task(db: Session, body: CustomTaskCreate, settings: Settings) -> Task:
+    source_filename = _safe_repo_filename(body.source_filename)
+    test_filename = _safe_repo_filename(body.test_filename)
+    if source_filename == test_filename:
+        raise PermissionError("custom task source and test filenames must be different")
+    acceptance_command = _safe_custom_acceptance_command(body.acceptance_command)
+    slug = _slugify(body.name)
+    task_root = _unique_custom_task_root(settings.harness_root, slug)
+    repo_dir = task_root / "repo"
+    repo_dir.mkdir(parents=True, exist_ok=False)
+    (repo_dir / source_filename).write_text(body.source_code, encoding="utf-8")
+    (repo_dir / test_filename).write_text(body.test_code, encoding="utf-8")
+    task_spec = {
+        "id": task_root.name,
+        "repo": str(repo_dir),
+        "goal": body.goal,
+        "allowlist": [source_filename],
+        "acceptance": [acceptance_command],
+        "budget": {"acceptance_timeout_seconds": 30, "context_summary_files": 8},
+    }
+    task_path = task_root / "task.json"
+    task_path.write_text(json.dumps(task_spec, ensure_ascii=False, indent=2), encoding="utf-8")
+    return create_task(
+        db,
+        TaskCreate(name=body.name, description=body.goal, harness_task_path=str(task_path)),
+        settings,
+    )
 
 
 def create_task(db: Session, body: TaskCreate, settings: Settings) -> Task:
@@ -28,6 +76,29 @@ def create_task(db: Session, body: TaskCreate, settings: Settings) -> Task:
     db.commit()
     db.refresh(task)
     return task
+
+
+def retry_run(
+    db: Session,
+    source_run_id: int,
+    body: RetryRunCreate,
+    user_id: str,
+    settings: Settings,
+    limiter: MemoryRateLimiter,
+) -> Run:
+    source = db.get(Run, source_run_id)
+    if not source:
+        raise LookupError("run not found")
+    if source.status not in {RunStatus.failed.value, RunStatus.timeout.value, RunStatus.cancelled.value}:
+        raise PermissionError("only failed, timed out, or cancelled runs can be retried")
+    retry_body = RunCreate(
+        task_id=source.task_id,
+        mode=source.mode,
+        model=source.model,
+        allow_llm_calls=body.allow_llm_calls,
+        timeout_seconds=body.timeout_seconds or source.timeout_seconds,
+    )
+    return create_run(db, retry_body, user_id, None, settings, limiter)
 
 
 def create_run(
@@ -46,9 +117,20 @@ def create_run(
             select(Run).where(Run.user_id == user_id, Run.idempotency_key == idempotency_key)
         ).scalar_one_or_none()
         if existing:
+            expected_model = body.model or settings.harness_default_model
+            if (
+                existing.task_id != task.id
+                or existing.mode != body.mode
+                or existing.model != expected_model
+                or existing.allow_llm_calls != body.allow_llm_calls
+                or existing.timeout_seconds != body.timeout_seconds
+            ):
+                raise IdempotencyConflict("Idempotency-Key was already used with a different run request")
             return existing
     if body.mode == "api" and body.allow_llm_calls and not settings.allow_real_llm_calls:
         raise PermissionError("real LLM calls are disabled by ALLOW_REAL_LLM_CALLS")
+    if body.mode == "api" and body.allow_llm_calls:
+        _ensure_real_api_budget_available(db, settings)
     limiter.check(f"runs:{user_id}")
     run = Run(
         task_id=task.id,
@@ -67,10 +149,18 @@ def create_run(
 
 
 def execute_run(db: Session, run_id: int, client: HarnessClient, settings: Settings) -> None:
+    claimed_at = utc_now()
+    claimed = db.execute(
+        update(Run)
+        .where(Run.id == run_id, Run.status == RunStatus.pending.value)
+        .values(status=RunStatus.running.value, started_at=claimed_at)
+    ).rowcount
+    db.commit()
+    if claimed != 1:
+        return
+
     run = db.get(Run, run_id)
     if not run:
-        return
-    if run.status == RunStatus.cancelled.value:
         return
     task = db.get(Task, run.task_id)
     if not task:
@@ -80,9 +170,6 @@ def execute_run(db: Session, run_id: int, client: HarnessClient, settings: Setti
         run.finished_at = utc_now()
         db.commit()
         return
-    run.status = RunStatus.running.value
-    run.started_at = utc_now()
-    db.commit()
     try:
         result = client.run_task(
             task_spec_path=task.harness_task_path,
@@ -147,6 +234,53 @@ def _resolve_harness_task_path(task_path: str, harness_root: Path) -> Path:
     candidate = candidate.resolve()
     if candidate != root and root not in candidate.parents:
         raise PermissionError(f"harness_task_path must stay inside allowed harness root: {root}")
+    return candidate
+
+
+def _ensure_real_api_budget_available(db: Session, settings: Settings) -> None:
+    spent_usd = db.execute(
+        select(func.sum(Usage.estimated_cost_usd))
+        .join(Run)
+        .where(Run.mode == "api", Run.allow_llm_calls.is_(True))
+    ).scalar()
+    spent_cny = float(spent_usd or 0.0) * settings.usd_to_cny_rate
+    limit = settings.real_api_budget_limit_cny
+    if spent_cny >= limit:
+        raise PermissionError(f"real API retry budget reached {limit:g} CNY")
+
+
+def _safe_repo_filename(value: str) -> str:
+    path = Path(value)
+    if path.name != value or path.is_absolute() or value in {"", ".", ".."}:
+        raise PermissionError("custom task filename must be a single safe repo filename")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+        raise PermissionError("custom task filename contains unsupported characters")
+    return value
+
+
+def _safe_custom_acceptance_command(value: str) -> str:
+    try:
+        parts = tuple(shlex.split(value.strip()))
+    except ValueError as exc:
+        raise PermissionError(f"custom task acceptance command is invalid: {exc}") from exc
+    if parts not in _ALLOWED_CUSTOM_ACCEPTANCE_COMMANDS:
+        raise PermissionError("custom task acceptance command must be a pytest command")
+    return " ".join(parts)
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", value.strip().lower()).strip("-")
+    return (slug or "custom-task")[:60]
+
+
+def _unique_custom_task_root(harness_root: Path, slug: str) -> Path:
+    root = Path(harness_root).resolve() / "custom_tasks"
+    root.mkdir(parents=True, exist_ok=True)
+    candidate = root / slug
+    counter = 2
+    while candidate.exists():
+        candidate = root / f"{slug}-{counter}"
+        counter += 1
     return candidate
 
 

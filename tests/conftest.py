@@ -13,7 +13,7 @@ os.environ.setdefault("HARNESS_RUNS_ROOT", "./test_artifacts/harness_runs")
 os.environ.setdefault("ALLOW_REAL_LLM_CALLS", "false")
 
 from app.db import Base, get_db  # noqa: E402
-from app.main import app, settings  # noqa: E402
+from app.main import app, limiter, settings  # noqa: E402
 
 
 @pytest.fixture()
@@ -25,6 +25,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     Base.metadata.create_all(bind=engine)
     monkeypatch.setattr(settings, "harness_runs_root", runs_root)
     monkeypatch.setattr(settings, "harness_root", tmp_path / "harness")
+    if hasattr(limiter, "buckets"):
+        limiter.buckets.clear()
     runs_root.mkdir(parents=True, exist_ok=True)
     settings.harness_root.mkdir(parents=True, exist_ok=True)
 

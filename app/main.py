@@ -6,18 +6,42 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .artifacts import ArtifactNotFound, UnsafeArtifactPath, read_json, resolve_artifact
 from .cache import build_cache
 from .config import load_settings
 from .db import SessionLocal, get_db, init_db
+from .evaluation import build_evaluation_summary
 from .harness_client import HarnessClient
 from .models import Run, Task
 from .process_manager import ProcessRegistry
 from .rate_limit import RateLimitExceeded, build_rate_limiter
-from .schemas import CostMetricsOut, RunCreate, RunOut, TaskCreate, TaskOut
-from .services import artifact_links, cancel_run, cost_metrics, create_run, create_task, execute_run
+from .schemas import (
+    CostMetricsOut,
+    CustomTaskCreate,
+    EvaluationSummaryOut,
+    RetryRunCreate,
+    RunCatalogItemOut,
+    RunCreate,
+    RunOut,
+    RunSourceOut,
+    SourceFileOut,
+    TaskCreate,
+    TaskOut,
+)
+from .services import (
+    IdempotencyConflict,
+    artifact_links,
+    cancel_run,
+    cost_metrics,
+    create_custom_task,
+    create_run,
+    create_task,
+    execute_run,
+    retry_run,
+)
 
 settings = load_settings()
 settings.harness_runs_root.mkdir(parents=True, exist_ok=True)
@@ -37,6 +61,36 @@ harness_client = HarnessClient(
     process_registry=process_registry,
 )
 
+_SOURCE_ALLOWED_SUFFIXES = {".py", ".md", ".json", ".txt", ".toml", ".yaml", ".yml"}
+_SOURCE_IGNORED_DIR_NAMES = {
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "node_modules",
+    ".venv",
+    "runs",
+    "runs_deepseek",
+    "runs_deepseek_real",
+    "artifacts",
+}
+_SOURCE_IGNORED_FILE_NAMES = {
+    ".env",
+    ".env.local",
+    ".env.development",
+    ".env.test",
+    ".env.production",
+}
+_SOURCE_SENSITIVE_NAME_FRAGMENTS = {"secret", "token", "password", "credential", "api_key", "apikey"}
+_SOURCE_MAX_FILES = 80
+_SOURCE_MAX_FILE_BYTES = 64_000
+_SOURCE_MAX_TOTAL_BYTES = 512_000
+_REPORT_SECURITY_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+}
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -52,10 +106,37 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/demo/status")
+def demo_status() -> dict:
+    return {
+        "status": "ok",
+        "harness_root": str(settings.harness_root),
+        "harness_exists": (settings.harness_root / "src" / "openagent_harness" / "cli.py").exists(),
+        "allow_real_llm_calls": settings.allow_real_llm_calls,
+        "real_api_budget_limit_cny": settings.real_api_budget_limit_cny,
+        "harness_runs_root": str(settings.harness_runs_root),
+    }
+
+
 @app.post("/tasks", response_model=TaskOut)
 def post_task(body: TaskCreate, db: Session = Depends(get_db)) -> TaskOut:
     try:
         task = create_task(db, body, settings)
+    except PermissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TaskOut(
+        task_id=task.id,
+        name=task.name,
+        description=task.description,
+        harness_task_path=task.harness_task_path,
+        created_at=task.created_at,
+    )
+
+
+@app.post("/custom-tasks", response_model=TaskOut)
+def post_custom_task(body: CustomTaskCreate, db: Session = Depends(get_db)) -> TaskOut:
+    try:
+        task = create_custom_task(db, body, settings)
     except PermissionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return TaskOut(
@@ -83,6 +164,29 @@ def post_run(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RateLimitExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except IdempotencyConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if run.status == "pending" and settings.auto_start_runs:
+        _schedule_run(background_tasks, run.id)
+    return _run_out(run)
+
+
+@app.post("/runs/{run_id}/retry", response_model=RunOut)
+def post_retry_run(
+    run_id: int,
+    body: RetryRunCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user_id: str = Header(default="anonymous", alias="X-User-ID"),
+) -> RunOut:
+    try:
+        run = retry_run(db, run_id, body, user_id, settings, limiter)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     if run.status == "pending" and settings.auto_start_runs:
         _schedule_run(background_tasks, run.id)
     return _run_out(run)
@@ -95,6 +199,15 @@ def post_cancel_run(run_id: int, db: Session = Depends(get_db)) -> RunOut:
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _run_out(run)
+
+
+@app.get("/runs", response_model=list[RunCatalogItemOut])
+def list_runs(
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[RunCatalogItemOut]:
+    runs = db.execute(select(Run).join(Task).order_by(Run.created_at.desc(), Run.id.desc()).limit(limit)).scalars().all()
+    return [_run_catalog_item(run) for run in runs]
 
 
 @app.get("/runs/{run_id}", response_model=RunOut)
@@ -110,9 +223,55 @@ def get_run(run_id: int, db: Session = Depends(get_db)) -> RunOut:
     return _run_out(run)
 
 
+@app.get("/runs/{run_id}/source", response_model=RunSourceOut)
+def get_run_source(run_id: int, db: Session = Depends(get_db)) -> RunSourceOut:
+    run = db.get(Run, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+    if not run.artifacts_dir:
+        raise HTTPException(status_code=404, detail="source snapshot not found")
+
+    repo_root = (Path(run.artifacts_dir).resolve() / "repo").resolve()
+    runs_root = settings.harness_runs_root.resolve()
+    if runs_root not in repo_root.parents and repo_root != runs_root:
+        raise HTTPException(status_code=400, detail="artifact path escaped root")
+    if not repo_root.is_dir():
+        raise HTTPException(status_code=404, detail="source snapshot not found")
+
+    files: list[SourceFileOut] = []
+    total_bytes = 0
+    for path in sorted(repo_root.rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        relative = path.relative_to(repo_root).as_posix()
+        if not _include_source_snapshot_file(relative, path):
+            continue
+        size = path.stat().st_size
+        if size > _SOURCE_MAX_FILE_BYTES or total_bytes + size > _SOURCE_MAX_TOTAL_BYTES:
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        files.append(SourceFileOut(path=relative, content=content))
+        total_bytes += size
+        if len(files) >= _SOURCE_MAX_FILES:
+            break
+
+    return RunSourceOut(
+        run_id=run.id,
+        harness_run_id=run.harness_run_id,
+        artifacts_dir=run.artifacts_dir,
+        files=files,
+    )
+
+
 @app.get("/runs/{run_id}/report", response_class=HTMLResponse)
 def get_report(run_id: int, db: Session = Depends(get_db)):
-    return HTMLResponse(_artifact(run_id, db, "report.html").read_text(encoding="utf-8"))
+    return HTMLResponse(
+        _artifact(run_id, db, "report.html").read_text(encoding="utf-8"),
+        headers=_REPORT_SECURITY_HEADERS,
+    )
 
 
 @app.get("/runs/{run_id}/patch", response_class=PlainTextResponse)
@@ -141,7 +300,17 @@ def get_cost_metrics(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
 ) -> CostMetricsOut:
-    return cost_metrics(db, _parse_date(date_from), _parse_date(date_to))
+    try:
+        parsed_from = _parse_date(date_from)
+        parsed_to = _parse_date(date_to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date filters must be ISO-8601 datetime strings") from exc
+    return cost_metrics(db, parsed_from, parsed_to)
+
+
+@app.get("/evaluation/summary", response_model=EvaluationSummaryOut)
+def get_evaluation_summary(db: Session = Depends(get_db)) -> EvaluationSummaryOut:
+    return EvaluationSummaryOut.model_validate(build_evaluation_summary(db, settings.harness_runs_root))
 
 
 def _execute_run_in_new_session(run_id: int) -> None:
@@ -186,6 +355,17 @@ def _run_out(run: Run) -> RunOut:
     return out
 
 
+def _run_catalog_item(run: Run) -> RunCatalogItemOut:
+    out = _run_out(run)
+    task = run.task
+    return RunCatalogItemOut(
+        **out.model_dump(),
+        task_name=task.name if task else f"task #{run.task_id}",
+        task_description=task.description if task else "",
+        harness_task_path=task.harness_task_path if task else "",
+    )
+
+
 def _artifact(run_id: int, db: Session, filename: str) -> Path:
     run = db.get(Run, run_id)
     if not run:
@@ -198,6 +378,18 @@ def _artifact(run_id: int, db: Session, filename: str) -> Path:
         raise HTTPException(status_code=404, detail="artifact not found") from exc
     except UnsafeArtifactPath as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _include_source_snapshot_file(relative: str, path: Path) -> bool:
+    parts = Path(relative).parts
+    if any(part in _SOURCE_IGNORED_DIR_NAMES for part in parts[:-1]):
+        return False
+    name = path.name.lower()
+    if path.name in _SOURCE_IGNORED_FILE_NAMES or name.startswith(".env"):
+        return False
+    if any(fragment in name for fragment in _SOURCE_SENSITIVE_NAME_FRAGMENTS):
+        return False
+    return path.suffix in _SOURCE_ALLOWED_SUFFIXES
 
 
 def _parse_date(value: str | None) -> datetime | None:

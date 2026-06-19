@@ -40,7 +40,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -381,6 +382,17 @@ h1 {
   align-content: space-between;
 }
 
+.metric-grid,
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.comparison-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .metric-card span {
   color: #475569;
   font-size: 0.88rem;
@@ -459,7 +471,8 @@ h1 {
 }
 
 .form-row input,
-.form-row select {
+.form-row select,
+.form-row textarea {
   width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
@@ -470,12 +483,25 @@ h1 {
   background: white;
 }
 
+.form-row textarea {
+  min-height: 96px;
+  padding: 12px;
+  resize: vertical;
+  line-height: 1.5;
+  font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+}
+
+.form-row textarea.tall {
+  min-height: 260px;
+}
+
 .form-row input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
-.form-row select:focus {
+.form-row select:focus,
+.form-row textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
@@ -509,6 +535,47 @@ h1 {
 .profile-summary em {
   font-style: normal;
   font-weight: 800;
+}
+
+.real-call-box {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.real-call-box.server-off {
+  border-color: #f5dfa8;
+  background: var(--warning-soft);
+}
+
+.real-call-box.server-on {
+  border-color: #c7ead9;
+  background: var(--success-soft);
+}
+
+.real-call-box p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
 }
 
 .button-row,
@@ -656,6 +723,89 @@ button:disabled {
   margin-top: 18px;
 }
 
+.run-catalog {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.run-card {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  min-height: 148px;
+  padding: 14px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.run-card:hover,
+.run-card.active {
+  border-color: #cfddff;
+  background: var(--accent-soft);
+}
+
+.run-card strong,
+.run-card em,
+.run-card small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.run-card em,
+.run-card small {
+  color: var(--muted);
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.run-card small {
+  font-size: 0.78rem;
+}
+
+.empty-state {
+  padding: 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.link-btn {
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  background: transparent;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.failure-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #ffcbd4;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: #7f1d1d;
+}
+
+.failure-box p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.small {
+  margin-top: 12px;
+  font-size: 0.86rem;
+}
+
 .mini-status {
   padding: 6px 10px;
   font-size: 0.78rem;
@@ -690,6 +840,11 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.compact-code {
+  min-height: 260px;
+  max-height: 420px;
+}
+
 .model-row {
   display: grid;
   grid-template-columns: 1.4fr 0.6fr 0.8fr 0.8fr;
@@ -700,6 +855,38 @@ button:disabled {
 }
 
 .model-row strong {
+  color: var(--text);
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+  background: white;
+}
+
+.data-table th,
+.data-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.data-table th {
+  color: #475569;
+  background: var(--surface-2);
+  font-weight: 800;
+}
+
+.data-table td {
   color: var(--text);
 }
 
@@ -782,7 +969,10 @@ button:disabled {
   .hero-panel,
   .boundary,
   .two-col,
-  .evidence-grid {
+  .evidence-grid,
+  .metric-grid,
+  .comparison-grid,
+  .run-catalog {
     grid-template-columns: 1fr;
   }
 
