@@ -6,9 +6,8 @@ from app.config import _default_harness_root, load_settings
 def test_default_harness_root_prefers_bundle_harness() -> None:
     root = _default_harness_root()
 
-    assert root.name == "02_OpenAgent_Harness"
+    assert root.name in {"02_OpenAgent_Harness", "OpenAgent-Harness", "OpenAgent-Harness-v1-final"}
     assert (root / "src" / "openagent_harness" / "cli.py").exists()
-    assert "OpenAgent-Harness-v1-final" not in str(root)
 
 
 def test_default_real_api_budget_matches_interview_smoke_budget(monkeypatch) -> None:

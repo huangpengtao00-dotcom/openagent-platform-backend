@@ -134,6 +134,8 @@ pytest -q
 uvicorn app.main:app --reload
 ```
 
+If `pytest -q` reports `cannot import name 'command' from 'alembic'`, the virtualenv is missing the Alembic dependency and Python is importing the local `alembic/` migration folder instead. Re-run `pip install -e .[dev]` in the active virtualenv before retrying.
+
 Open:
 
 ```text

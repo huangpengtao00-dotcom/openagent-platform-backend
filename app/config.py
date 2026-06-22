@@ -31,14 +31,17 @@ def _float(name: str, default: float) -> float:
 def _default_harness_root() -> Path:
     backend_root = Path(__file__).resolve().parents[1]
     bundle_root = backend_root.parent
+    archive_root = bundle_root.parent
     candidates = [
         bundle_root / "02_OpenAgent_Harness",
         bundle_root / "OpenAgent-Harness",
+        archive_root / "Desktop_备份" / "OpenAgent-Harness-v1-final",
+        archive_root / "Desktop_待处理_实习项目" / "OpenAgent-Harness",
     ]
     for candidate in candidates:
         if (candidate / "pyproject.toml").exists() and (candidate / "src" / "openagent_harness" / "cli.py").exists():
             return candidate.resolve()
-    return (bundle_root / "02_OpenAgent_Harness").resolve()
+    return candidates[0].resolve()
 
 
 @dataclass
