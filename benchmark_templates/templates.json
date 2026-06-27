@@ -1,0 +1,42 @@
+[
+  {
+    "id": "template_easy_duration_parser",
+    "difficulty": "easy",
+    "name": "Duration Parser",
+    "source_filename": "duration_parser.py",
+    "goal": "支持 \"10s\"、\"2m\"、\"1h\"，空值或未知单位返回 0，不要抛异常。",
+    "source_code": "def parse_duration(value):\n    amount = int(value[:-1])\n    unit = value[-1]\n    if unit == \"s\":\n        return amount\n    if unit == \"m\":\n        return amount * 60\n    return amount\n"
+  },
+  {
+    "id": "template_easy_pagination_bounds",
+    "difficulty": "easy",
+    "name": "Pagination Bounds",
+    "source_filename": "pager.py",
+    "goal": "修复分页边界：page 从 1 开始，小于 1 时按 1 处理，page_size 小于 1 时返回空列表。",
+    "source_code": "def page_items(items, page, page_size):\n    start = page * page_size\n    end = start + page_size\n    return items[start:end]\n"
+  },
+  {
+    "id": "template_medium_config_merge",
+    "difficulty": "medium",
+    "name": "Config Merge",
+    "source_filename": "config_loader.py",
+    "goal": "合并用户配置和默认配置，保留嵌套 headers，不能修改 DEFAULTS。",
+    "source_code": "DEFAULTS = {\n    \"timeout\": 3,\n    \"headers\": {\"User-Agent\": \"OpenAgent\", \"Accept\": \"application/json\"},\n}\n\n\nclass ConfigLoader:\n    def __init__(self, defaults=None):\n        self.defaults = defaults or DEFAULTS\n\n    def load_config(self, user_config):\n        if user_config is None:\n            return self.defaults\n        if not isinstance(user_config, dict):\n            raise ValueError(\"user_config must be a dict\")\n        config = self.defaults\n        for key, value in user_config.items():\n            config[key] = value\n        return config\n\n\ndef load_config(user_config):\n    return ConfigLoader().load_config(user_config)\n"
+  },
+  {
+    "id": "template_medium_artifact_search",
+    "difficulty": "medium",
+    "name": "Artifact Search Filters",
+    "source_filename": "artifact_search.py",
+    "goal": "支持按 status 和 tag 过滤，分页不能越界，缺少 tags 字段时按空列表处理。",
+    "source_code": "ARTIFACTS = [\n    {\"id\": 1, \"status\": \"pass\", \"tags\": [\"patch\", \"trace\"]},\n    {\"id\": 2, \"status\": \"fail\", \"tags\": [\"cost\"]},\n    {\"id\": 3, \"status\": \"pass\"},\n]\n\n\nclass ArtifactSearch:\n    def __init__(self, rows=None):\n        self.rows = rows or ARTIFACTS\n\n    def search_artifacts(self, status=None, tag=None, page=1, page_size=10):\n        rows = self.rows\n        if status:\n            rows = [row for row in rows if row[\"status\"] == status]\n        if tag:\n            rows = [row for row in rows if tag in row[\"tags\"]]\n        if page < 1:\n            raise ValueError(\"page must start from 1\")\n        start = page * page_size\n        return rows[start:start + page_size]\n\n\ndef search_artifacts(status=None, tag=None, page=1, page_size=10):\n    return ArtifactSearch().search_artifacts(status, tag, page, page_size)\n"
+  },
+  {
+    "id": "template_hard_async_retry_client",
+    "difficulty": "hard",
+    "name": "Async Retry Client",
+    "source_filename": "async_client.py",
+    "goal": "实现异步请求重试：429 和 timeout 可以重试，最多 retries 次；非 2xx 直接返回错误；成功返回 JSON。",
+    "source_code": "import asyncio\n\n\nclass ApiClient:\n    def __init__(self, session, retries=2):\n        self.session = session\n        self.retries = retries\n\n    async def fetch_json(self, url):\n        response = await self.session.get(url)\n        if response.status == 429:\n            await asyncio.sleep(0.1)\n            response = await self.session.get(url)\n        if response.status >= 400:\n            return {\"ok\": False, \"status\": response.status}\n        return await response.json()\n"
+  }
+]

@@ -12,14 +12,17 @@ from .artifacts import read_json, resolve_artifact
 from .models import Run, Task
 
 
-def build_evaluation_summary(db: Session, runs_root: Path) -> dict[str, Any]:
-    runs = db.execute(select(Run).join(Task).order_by(Run.created_at, Run.id)).scalars().all()
-    attempt_counts: dict[tuple[int, str, str], int] = defaultdict(int)
+def build_evaluation_summary(db: Session, runs_root: Path, workspace_id: int | None = None) -> dict[str, Any]:
+    query = select(Run).join(Task).order_by(Run.created_at, Run.id)
+    if workspace_id is not None:
+        query = query.where(Task.workspace_id == workspace_id)
+    runs = db.execute(query).scalars().all()
+    attempt_counts: dict[tuple[int, str, str, str | None, str | None, str | None], int] = defaultdict(int)
     rows: list[dict[str, Any]] = []
 
     for run in runs:
         task = db.get(Task, run.task_id)
-        key = (run.task_id, run.mode, run.model)
+        key = (run.task_id, run.mode, run.model, run.model_provider, run.base_url, run.wire_api)
         attempt_counts[key] += 1
         attempt_index = attempt_counts[key]
         scorecard = _artifact_json(runs_root, run, "scorecard.json")
@@ -44,6 +47,7 @@ def build_evaluation_summary(db: Session, runs_root: Path) -> dict[str, Any]:
             "estimated_cost_usd": float(usage.estimated_cost_usd if usage else 0.0),
             "duration_seconds": duration_seconds,
             "report_link": f"/runs/{run.id}/report" if run.artifacts_dir else None,
+            "_comparison_group": _comparison_group(run),
         }
         rows.append(row)
 
@@ -66,12 +70,25 @@ def build_evaluation_summary(db: Session, runs_root: Path) -> dict[str, Any]:
         "total_cost_usd": round(sum(row["estimated_cost_usd"] for row in rows), 8),
         "duration_seconds": round(sum(row["duration_seconds"] or 0 for row in rows), 3),
     }
+    profiles = _profile_summaries(rows)
     return {
         "summary": summary,
-        "profiles": _profile_summaries(rows),
-        "tasks": rows,
+        "profiles": profiles,
+        "recommendations": _model_recommendations(profiles),
+        "tasks": [_public_row(row) for row in rows],
         "retry_comparisons": _retry_comparisons(rows),
     }
+
+
+def _comparison_group(run: Run) -> str:
+    return "|".join(
+        str(value or "")
+        for value in [run.task_id, run.mode, run.model, run.model_provider, run.base_url, run.wire_api]
+    )
+
+
+def _public_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in row.items() if not key.startswith("_")}
 
 
 def _profile_label(run: Run, attempt_index: int) -> str:
@@ -79,6 +96,19 @@ def _profile_label(run: Run, attempt_index: int) -> str:
         return "scripted baseline"
     if attempt_index > 1:
         return "retry with context"
+    provider_hint = " ".join(
+        str(value or "")
+        for value in [run.model_provider, run.base_url, run.wire_api]
+    ).lower()
+    model_hint = run.model.lower()
+    if "newapi" in provider_hint:
+        if "5.4" in provider_hint or model_hint == "gpt-5.4":
+            return "NewAPI 5.4"
+        if "5.5" in provider_hint or model_hint == "gpt-5.5":
+            return "NewAPI 5.5"
+        return "NewAPI"
+    if "fighting" in provider_hint or "openai" in provider_hint or run.model.lower().startswith(("gpt-", "o1", "o3", "o4", "o5")):
+        return "OpenAI Fighting API"
     return "DeepSeek API"
 
 
@@ -86,7 +116,15 @@ def _profile_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         grouped[row["profile"]].append(row)
-    order = {"scripted baseline": 0, "DeepSeek API": 1, "retry with context": 2}
+    order = {
+        "scripted baseline": 0,
+        "DeepSeek API": 1,
+        "NewAPI": 2,
+        "NewAPI 5.4": 3,
+        "NewAPI 5.5": 4,
+        "OpenAI Fighting API": 5,
+        "retry with context": 6,
+    }
     profiles = []
     for profile, items in sorted(grouped.items(), key=lambda item: order.get(item[0], 99)):
         passed = sum(1 for row in items if row["status"] == "pass")
@@ -108,11 +146,70 @@ def _profile_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return profiles
 
 
+def _model_recommendations(profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates = [profile for profile in profiles if profile["total"] > 0]
+    if not candidates:
+        return []
+
+    def avg_cost(profile: dict[str, Any]) -> float:
+        return float(profile["estimated_cost_usd"]) / max(1, int(profile["total"]))
+
+    def avg_tokens(profile: dict[str, Any]) -> float:
+        return float(profile["tokens"]) / max(1, int(profile["total"]))
+
+    stable = max(candidates, key=lambda item: (item["pass_rate"], item["avg_score"], -item["failed"], -item["duration_seconds"]))
+    cheapest = min(candidates, key=lambda item: (avg_cost(item), avg_tokens(item), -item["pass_rate"]))
+    fastest = min(candidates, key=lambda item: (item["duration_seconds"] / max(1, item["total"]), -item["pass_rate"]))
+    balanced = max(
+        candidates,
+        key=lambda item: (
+            item["pass_rate"] * 60
+            + item["avg_score"] * 0.28
+            - avg_cost(item) * 1000
+            - (item["duration_seconds"] / max(1, item["total"])) * 0.15
+            - item["failed"] * 4
+        ),
+    )
+    return [
+        {
+            "category": "stable",
+            "profile": stable["profile"],
+            "score": round(stable["pass_rate"] * 100 + stable["avg_score"], 3),
+            "reason": f"通过率 {stable['pass_rate']:.1%}，平均分 {stable['avg_score']}，失败 {stable['failed']} 次。",
+        },
+        {
+            "category": "cheap",
+            "profile": cheapest["profile"],
+            "score": round(avg_cost(cheapest), 8),
+            "reason": f"平均成本 ${avg_cost(cheapest):.5f}，平均 token {avg_tokens(cheapest):.0f}。",
+        },
+        {
+            "category": "fast",
+            "profile": fastest["profile"],
+            "score": round(fastest["duration_seconds"] / max(1, fastest["total"]), 3),
+            "reason": f"平均耗时 {fastest['duration_seconds'] / max(1, fastest['total']):.2f}s，通过率 {fastest['pass_rate']:.1%}。",
+        },
+        {
+            "category": "balanced",
+            "profile": balanced["profile"],
+            "score": round(
+                balanced["pass_rate"] * 60
+                + balanced["avg_score"] * 0.28
+                - avg_cost(balanced) * 1000
+                - (balanced["duration_seconds"] / max(1, balanced["total"])) * 0.15
+                - balanced["failed"] * 4,
+                3,
+            ),
+            "reason": f"综合通过率、平均分、成本和耗时后排名最高：{balanced['pass_rate']:.1%} / {balanced['avg_score']} 分。",
+        },
+    ]
+
+
 def _retry_comparisons(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        if row["profile"] in {"DeepSeek API", "retry with context"}:
-            grouped[(row["task_id"], row["profile"] if row["profile"] == "DeepSeek API" else "DeepSeek API")].append(row)
+        if row["profile"] in {"DeepSeek API", "NewAPI", "NewAPI 5.4", "NewAPI 5.5", "OpenAI Fighting API", "retry with context"}:
+            grouped[(row["task_id"], row["_comparison_group"])].append(row)
 
     comparisons: list[dict[str, Any]] = []
     for (task_id, _profile), items in grouped.items():

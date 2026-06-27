@@ -1,4 +1,4 @@
-import type { CostMetrics, EvaluationSummary, Run } from "./domain";
+﻿import type { CostMetrics, EvaluationMemorySummary, EvaluationSummary, Run } from "./domain";
 
 export type ArtifactKind = "report" | "patch" | "scorecard" | "test-result" | "trace";
 
@@ -48,6 +48,18 @@ export const demoCost: CostMetrics = {
       estimated_cost_usd: 0.00066,
     },
     {
+      model: "newapi-5.4",
+      runs: 1,
+      tokens: 28640,
+      estimated_cost_usd: 0,
+    },
+    {
+      model: "gpt-5.5",
+      runs: 1,
+      tokens: 32159,
+      estimated_cost_usd: 0,
+    },
+    {
       model: "scripted",
       runs: 10,
       tokens: 0,
@@ -58,27 +70,27 @@ export const demoCost: CostMetrics = {
 
 export const demoEvaluation: EvaluationSummary = {
   summary: {
-    total: 3,
-    passed: 3,
+    total: 4,
+    passed: 4,
     failed: 0,
     pass_rate: 1,
-    avg_score: 96.5,
-    total_patch_lines: 182,
-    total_changed_files: 5,
-    tests_passed: 3,
+    avg_score: 97.38,
+    total_patch_lines: 244,
+    total_changed_files: 7,
+    tests_passed: 4,
     failure_types: {
-      None: 3,
+      None: 4,
       NoPatch: 0,
       TestFailed: 0,
       ScopeViolation: 0,
     },
-    tokens: 620,
+    tokens: 32779,
     total_cost_usd: 0.00066,
-    duration_seconds: 18.42,
+    duration_seconds: 47.92,
   },
   profiles: [
     {
-      profile: "scripted baseline",
+      profile: "本地兜底 baseline",
       total: 1,
       passed: 1,
       failed: 0,
@@ -116,13 +128,52 @@ export const demoEvaluation: EvaluationSummary = {
       estimated_cost_usd: 0.00033,
       duration_seconds: 8.9,
     },
+    {
+      profile: "OpenAI Fighting API",
+      total: 1,
+      passed: 1,
+      failed: 0,
+      pass_rate: 1,
+      avg_score: 100,
+      patch_lines: 62,
+      changed_files: 2,
+      tokens: 32159,
+      estimated_cost_usd: 0,
+      duration_seconds: 29.5,
+    },
+  ],
+  recommendations: [
+    {
+      category: "stable",
+      profile: "OpenAI Fighting API",
+      score: 200,
+      reason: "通过率 100%，平均分 100，复杂 token-bucket 任务一次通过。",
+    },
+    {
+      category: "cheap",
+      profile: "本地兜底 baseline",
+      score: 0,
+      reason: "离线路径 0 token、0 成本，适合演示平台闭环。",
+    },
+    {
+      category: "fast",
+      profile: "本地兜底 baseline",
+      score: 0.72,
+      reason: "平均耗时 0.72s，是最快的基准链路。",
+    },
+    {
+      category: "balanced",
+      profile: "DeepSeek API",
+      score: 86.5,
+      reason: "真实 API 成本和 token 更轻，复杂度较高时可作为性价比优先选择。",
+    },
   ],
   tasks: [
     {
       run_id: 1,
       task_id: "retry-429-real",
       harness_run_id: "retry-429-real-bad6c1cc",
-      profile: "scripted baseline",
+      profile: "本地兜底 baseline",
       attempt_index: 1,
       status: "pass",
       score: 100,
@@ -169,6 +220,23 @@ export const demoEvaluation: EvaluationSummary = {
       duration_seconds: 8.9,
       report_link: "/runs/3/report",
     },
+    {
+      run_id: 4,
+      task_id: "stair-25-hard-token-bucket",
+      harness_run_id: "stair-25-hard-token-bucket-openai",
+      profile: "OpenAI Fighting API",
+      attempt_index: 1,
+      status: "pass",
+      score: 100,
+      patch_lines: 62,
+      changed_files: 2,
+      tests_passed: true,
+      failure_type: "None",
+      tokens: 32159,
+      estimated_cost_usd: 0,
+      duration_seconds: 29.5,
+      report_link: "/runs/4/report",
+    },
   ],
   retry_comparisons: [
     {
@@ -181,6 +249,44 @@ export const demoEvaluation: EvaluationSummary = {
       failure_type_changed: true,
       first_failure_type: "TestFailed",
       retry_failure_type: "None",
+    },
+  ],
+};
+
+export const demoMemorySummary: EvaluationMemorySummary = {
+  total_records: 4,
+  passed_records: 3,
+  failed_records: 1,
+  retry_records: 1,
+  retry_successes: 1,
+  fail_to_pass_rate: 1,
+  failure_types: {
+    None: 3,
+    TestFailed: 1,
+  },
+  top_tasks: [
+    {
+      task_name: "retry-429-real",
+      total: 2,
+      passed: 1,
+      failed: 1,
+      last_run_id: 3,
+    },
+    {
+      task_name: "config-loader-real",
+      total: 1,
+      passed: 1,
+      failed: 0,
+      last_run_id: 2,
+    },
+  ],
+  recent_items: [
+    {
+      run_id: 3,
+      task_name: "retry-429-real",
+      status: "pass",
+      source_run_id: 1,
+      failure_type: "None",
     },
   ],
 };

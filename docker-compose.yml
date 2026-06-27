@@ -9,6 +9,7 @@ services:
     environment:
       AUTO_START_RUNS: "false"
       ENABLE_REDIS: "true"
+      RUN_QUEUE_BACKEND: redis
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: sqlite:////app/data/openagent_platform.db
       HARNESS_ROOT: /harness
@@ -29,6 +30,7 @@ services:
     environment:
       AUTO_START_RUNS: "false"
       ENABLE_REDIS: "true"
+      RUN_QUEUE_BACKEND: redis
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: sqlite:////app/data/openagent_platform.db
       HARNESS_ROOT: /harness

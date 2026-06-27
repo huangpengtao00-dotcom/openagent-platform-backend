@@ -25,6 +25,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     Base.metadata.create_all(bind=engine)
     monkeypatch.setattr(settings, "harness_runs_root", runs_root)
     monkeypatch.setattr(settings, "harness_root", tmp_path / "harness")
+    monkeypatch.setattr(settings, "evaluation_memory_path", tmp_path / "evaluation_memory.jsonl")
     if hasattr(limiter, "buckets"):
         limiter.buckets.clear()
     runs_root.mkdir(parents=True, exist_ok=True)
