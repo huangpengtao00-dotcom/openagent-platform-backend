@@ -17,6 +17,7 @@ runs/
 runs_deepseek/
 runs_deepseek_real/
 test_artifacts/
+90_archive_cleanup_*/
 *.egg-info/
 frontend/node_modules/
 frontend/.vite/
