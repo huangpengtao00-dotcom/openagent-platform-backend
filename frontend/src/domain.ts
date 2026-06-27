@@ -18,7 +18,14 @@ export type Run = {
   status: RunStatus;
   mode: "local" | "api";
   model: string;
+  model_provider?: string | null;
+  base_url?: string | null;
+  wire_api?: string | null;
+  reasoning_effort?: string | null;
+  disable_response_storage?: boolean;
   timeout_seconds: number;
+  source_run_id?: number | null;
+  failure_context_path?: string | null;
   harness_run_id: string | null;
   artifacts_dir: string | null;
   failure_type: string | null;
@@ -36,6 +43,96 @@ export type RunCatalogItem = Run & {
   harness_task_path: string;
 };
 
+export type EvaluationHistoryRun = {
+  run_id: number;
+  status: RunStatus | string;
+  model: string;
+  model_provider?: string | null;
+  harness_run_id: string | null;
+  failure_type?: string | null;
+  error_message?: string | null;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  created_at: string;
+};
+
+export type EvaluationHistoryItem = {
+  evaluation_id?: number | null;
+  task_id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  status: "running" | "pass" | "partial" | "fail" | "empty" | string;
+  run_count: number;
+  model_count: number;
+  passed: number;
+  failed: number;
+  pending: number;
+  running: number;
+  pass_rate: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  latest_run_id: number | null;
+  best_run_id: number | null;
+  latest_failure_type?: string | null;
+  latest_error_message?: string | null;
+  failure_types?: Record<string, number>;
+  models: string[];
+  runs: EvaluationHistoryRun[];
+};
+
+export type Task = {
+  task_id: number;
+  name: string;
+  description: string;
+  harness_task_path: string;
+  created_at: string;
+};
+
+export type EvaluationCreateResult = {
+  evaluation_id?: number | null;
+  task: Task;
+  runs: Run[];
+  next_steps: string[];
+};
+
+export type EvaluationMatrixCell = {
+  run_id: number;
+  status: RunStatus | string;
+  model: string;
+  model_provider?: string | null;
+  failure_type?: string | null;
+  error_message?: string | null;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  duration_seconds?: number | null;
+  artifacts_dir?: string | null;
+};
+
+export type EvaluationMatrix = {
+  evaluation_id: number;
+  name: string;
+  goal: string;
+  status: "running" | "pass" | "partial" | "fail" | "empty" | string;
+  task_count: number;
+  model_count: number;
+  run_count: number;
+  passed: number;
+  failed: number;
+  pending: number;
+  running: number;
+  pass_rate: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  created_at: string;
+  tasks: Array<{
+    task_id: number;
+    task_name: string;
+    task_description: string;
+    models: EvaluationMatrixCell[];
+  }>;
+};
+
 export type RunSource = {
   run_id: number;
   harness_run_id: string | null;
@@ -44,6 +141,65 @@ export type RunSource = {
     path: string;
     content: string;
   }>;
+};
+
+export type FailureContext = {
+  source_run_id: number;
+  status: string;
+  failure_type: string | null;
+  error_message: string | null;
+  harness_run_id: string | null;
+  artifacts_dir: string;
+  task: Record<string, unknown>;
+  artifacts: Record<string, unknown>;
+  retry_guidance: Record<string, unknown>;
+};
+
+export type AgentRunArtifact = {
+  strategy?: {
+    tier?: "simple" | "standard" | "deep" | string;
+    max_steps?: number;
+    prompt_char_budget?: number;
+    rationale?: string[];
+  };
+  steps?: Array<{
+    index: number;
+    action: string;
+    args?: Record<string, unknown>;
+    observation?: Record<string, unknown>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      estimated_cost_usd?: number;
+    };
+  }>;
+  total_usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    estimated_cost_usd?: number;
+  };
+  finished?: boolean;
+  summary?: string;
+};
+
+export type EvaluationMemorySummary = {
+  total_records: number;
+  passed_records: number;
+  failed_records: number;
+  retry_records: number;
+  retry_successes: number;
+  fail_to_pass_rate: number;
+  failure_types: Record<string, number>;
+  top_tasks: Array<{
+    task_name: string;
+    total: number;
+    passed: number;
+    failed: number;
+    last_run_id: number | null;
+  }>;
+  recent_items: Array<Record<string, unknown>>;
 };
 
 export type CostMetrics = {
@@ -60,11 +216,39 @@ export type CostMetrics = {
 
 export type DemoStatus = {
   status: string;
+  app_env: string;
+  database: string;
   harness_root: string;
   harness_exists: boolean;
+  harness_runs_root: string;
+  harness_executor: string;
+  harness_docker_image: string;
   allow_real_llm_calls: boolean;
   real_api_budget_limit_cny: number;
-  harness_runs_root: string;
+  auto_start_runs: boolean;
+  queue_backend_configured: string;
+  queue_backend_active: string;
+  queue_key: string;
+  queue_depth: number | null;
+  redis_enabled: boolean;
+  redis_url: string;
+  redis_available: boolean;
+};
+
+export type DemoIdState = {
+  count: number;
+  min_id: number | null;
+  max_id: number | null;
+  ids: number[];
+};
+
+export type DemoState = {
+  status: string;
+  database: string;
+  generated_at: string;
+  tasks: DemoIdState;
+  runs: DemoIdState;
+  latest_runs: RunCatalogItem[];
 };
 
 export type EvaluationSummary = {
@@ -94,6 +278,12 @@ export type EvaluationSummary = {
     tokens: number;
     estimated_cost_usd: number;
     duration_seconds: number;
+  }>;
+  recommendations?: Array<{
+    category: "stable" | "cheap" | "fast" | "balanced" | string;
+    profile: string;
+    reason: string;
+    score: number;
   }>;
   tasks: Array<{
     run_id: number;

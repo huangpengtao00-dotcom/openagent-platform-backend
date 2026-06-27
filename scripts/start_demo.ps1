@@ -35,10 +35,43 @@ function Resolve-HarnessRoot {
 
 function Test-PortOpen {
     param([int]$Port)
-    $connection = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
-        Where-Object { $_.State -eq "Listen" } |
-        Select-Object -First 1
-    return $null -ne $connection
+
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $async = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne(300)) {
+            return $false
+        }
+        $client.EndConnect($async)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+    }
+}
+
+function Wait-PortOpen {
+    param(
+        [int]$Port,
+        [string]$Name,
+        [int]$TimeoutSeconds = 30,
+        [string]$LogPath = ""
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-PortOpen -Port $Port) {
+            return
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    $message = "Timed out waiting for $Name on port $Port."
+    if ($LogPath) {
+        $message = "$message Check log: $LogPath"
+    }
+    throw $message
 }
 
 function Stop-PortListeners {
@@ -111,12 +144,67 @@ function Assert-CompatibleBackend {
     }
 }
 
+function Quote-CmdValue {
+    param([string]$Value)
+    return '"' + ($Value -replace '"', '\"') + '"'
+}
+
+function Start-DemoCommandFile {
+    param(
+        [string]$ScriptPath,
+        [string[]]$Lines,
+        [string]$WorkingDirectory
+    )
+
+    $content = @("@echo off", "cd /d $(Quote-CmdValue $WorkingDirectory)") + $Lines
+    [System.IO.File]::WriteAllLines($ScriptPath, $content, [System.Text.Encoding]::Default)
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = "cmd.exe"
+    $startInfo.Arguments = "/d /c start ""OpenAgent Demo"" /min cmd.exe /d /c $(Quote-CmdValue $ScriptPath)"
+    $startInfo.WorkingDirectory = $WorkingDirectory
+    $startInfo.UseShellExecute = $true
+    $startInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    if ($null -eq $process) {
+        throw "Failed to start command file: $ScriptPath"
+    }
+    return $process
+}
+
+function Open-DemoBrowser {
+    param([string]$Url)
+
+    $candidates = @(
+        "C:\Program Files\Google\Chrome\Application\chrome.exe",
+        "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        "C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $candidate
+            [void]$startInfo.ArgumentList.Add("--new-window")
+            [void]$startInfo.ArgumentList.Add($Url)
+            $startInfo.UseShellExecute = $true
+            [void][System.Diagnostics.Process]::Start($startInfo)
+            return
+        }
+    }
+
+    Write-Host "Chrome/Edge was not found. Open this URL manually in an external browser: $Url"
+}
+
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $frontendRoot = Join-Path $repoRoot "frontend"
 $resolvedHarnessRoot = Resolve-HarnessRoot -Provided $HarnessRoot
 $demoArtifactsRoot = Join-Path $repoRoot "artifacts"
 $demoDbPath = Join-Path $demoArtifactsRoot "interview_demo.db"
 $demoRunsRoot = Join-Path $demoArtifactsRoot "interview_demo_runs"
+$demoLogsRoot = Join-Path $demoArtifactsRoot "demo_logs"
 $apiUrl = "http://127.0.0.1:$ApiPort"
 $frontendUrl = "http://127.0.0.1:$FrontendPort"
 
@@ -126,6 +214,7 @@ $summary = [pscustomobject]@{
     HarnessRoot = $resolvedHarnessRoot
     DemoDatabase = $demoDbPath
     DemoRunsRoot = $demoRunsRoot
+    DemoLogsRoot = $demoLogsRoot
     ApiUrl = $apiUrl
     FrontendUrl = $frontendUrl
     AllowRealLlmCalls = "true"
@@ -139,6 +228,7 @@ if ($DryRun) {
 }
 
 New-Item -ItemType Directory -Force -Path $demoArtifactsRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $demoLogsRoot | Out-Null
 
 if (Test-PortOpen -Port $ApiPort) {
     if ($KeepDemoData) {
@@ -156,43 +246,27 @@ if (-not (Test-PortOpen -Port $ApiPort)) {
     }
     New-Item -ItemType Directory -Force -Path $demoRunsRoot | Out-Null
 
-    $previousEnv = @{
-        DATABASE_URL = $env:DATABASE_URL
-        HARNESS_ROOT = $env:HARNESS_ROOT
-        HARNESS_PYTHON = $env:HARNESS_PYTHON
-        HARNESS_PYTHONPATH = $env:HARNESS_PYTHONPATH
-        HARNESS_RUNS_ROOT = $env:HARNESS_RUNS_ROOT
-        ALLOW_REAL_LLM_CALLS = $env:ALLOW_REAL_LLM_CALLS
-        REAL_API_BUDGET_LIMIT_CNY = $env:REAL_API_BUDGET_LIMIT_CNY
-        AUTO_START_RUNS = $env:AUTO_START_RUNS
-        ENABLE_REDIS = $env:ENABLE_REDIS
-    }
+    $apiOutLogPath = Join-Path $demoLogsRoot "api.out.log"
+    $apiErrLogPath = Join-Path $demoLogsRoot "api.err.log"
+    $apiScriptPath = Join-Path $demoLogsRoot "start_api.cmd"
+    $apiLines = @(
+        'set "DATABASE_URL=sqlite:///./artifacts/interview_demo.db"',
+        "set ""HARNESS_ROOT=$resolvedHarnessRoot""",
+        'set "HARNESS_PYTHON=python"',
+        'set "HARNESS_PYTHONPATH=src"',
+        'set "HARNESS_RUNS_ROOT=artifacts\interview_demo_runs"',
+        'set "HARNESS_EXECUTOR=local"',
+        'set "ALLOW_REAL_LLM_CALLS=true"',
+        'set "REAL_API_BUDGET_LIMIT_CNY=1.0"',
+        'set "AUTO_START_RUNS=true"',
+        'set "ENABLE_REDIS=false"',
+        'set "QUEUE_BACKEND=db"',
+        'set "RUN_QUEUE_BACKEND=db"',
+        "python -m uvicorn app.main:app --host 127.0.0.1 --port $ApiPort 1>>$(Quote-CmdValue $apiOutLogPath) 2>>$(Quote-CmdValue $apiErrLogPath)"
+    )
 
-    try {
-        $env:DATABASE_URL = "sqlite:///./artifacts/interview_demo.db"
-        $env:HARNESS_ROOT = $resolvedHarnessRoot
-        $env:HARNESS_PYTHON = "python"
-        $env:HARNESS_PYTHONPATH = "src"
-        $env:HARNESS_RUNS_ROOT = "artifacts\interview_demo_runs"
-        $env:ALLOW_REAL_LLM_CALLS = "true"
-        $env:REAL_API_BUDGET_LIMIT_CNY = "1.0"
-        $env:AUTO_START_RUNS = "true"
-        $env:ENABLE_REDIS = "false"
-
-        Start-Process `
-            -FilePath "python" `
-            -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$ApiPort") `
-            -WorkingDirectory $repoRoot `
-            -WindowStyle Hidden
-    } finally {
-        foreach ($name in $previousEnv.Keys) {
-            if ($null -eq $previousEnv[$name]) {
-                Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
-            } else {
-                Set-Item -LiteralPath "Env:$name" -Value $previousEnv[$name]
-            }
-        }
-    }
+    Start-DemoCommandFile -ScriptPath $apiScriptPath -Lines $apiLines -WorkingDirectory $repoRoot | Out-Null
+    Wait-PortOpen -Port $ApiPort -Name "API" -TimeoutSeconds 30 -LogPath $apiErrLogPath
 }
 
 if (Test-PortOpen -Port $FrontendPort) {
@@ -213,8 +287,16 @@ if (-not (Test-PortOpen -Port $FrontendPort)) {
             Pop-Location
         }
     }
-    $frontendCommand = "npm.cmd run dev -- --host 127.0.0.1 --port $FrontendPort"
-    Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $frontendCommand) -WorkingDirectory $frontendRoot -WindowStyle Hidden
+
+    $frontendOutLogPath = Join-Path $demoLogsRoot "frontend.out.log"
+    $frontendErrLogPath = Join-Path $demoLogsRoot "frontend.err.log"
+    $frontendScriptPath = Join-Path $demoLogsRoot "start_frontend.cmd"
+    $frontendLines = @(
+        "npm.cmd run dev -- --host 127.0.0.1 --port $FrontendPort 1>>$(Quote-CmdValue $frontendOutLogPath) 2>>$(Quote-CmdValue $frontendErrLogPath)"
+    )
+
+    Start-DemoCommandFile -ScriptPath $frontendScriptPath -Lines $frontendLines -WorkingDirectory $frontendRoot | Out-Null
+    Wait-PortOpen -Port $FrontendPort -Name "frontend" -TimeoutSeconds 30 -LogPath $frontendErrLogPath
 }
 
 Write-Host ""
@@ -224,11 +306,13 @@ Write-Host "Frontend: $frontendUrl"
 Write-Host "Harness:  $resolvedHarnessRoot"
 Write-Host "Demo DB:  $demoDbPath"
 Write-Host "Runs:     $demoRunsRoot"
+Write-Host "Logs:     $demoLogsRoot"
+Write-Host "Executor: HARNESS_EXECUTOR=local, QUEUE_BACKEND=db, ENABLE_REDIS=false"
 Write-Host "Real-call mode: ALLOW_REAL_LLM_CALLS=true"
 Write-Host "Budget:   REAL_API_BUDGET_LIMIT_CNY=1.0"
 Write-Host ""
 Write-Host "In the page: Evaluation -> Refresh dashboard, then Run Control -> scripted baseline -> Start evaluation."
 
 if (-not $NoBrowser) {
-    Start-Process $frontendUrl
+    Open-DemoBrowser -Url $frontendUrl
 }

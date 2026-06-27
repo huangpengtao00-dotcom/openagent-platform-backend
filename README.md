@@ -1,128 +1,101 @@
 # OpenAgent Platform Backend
 
-[![CI](https://github.com/huangpengtao00-dotcom/openagent-platform-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/huangpengtao00-dotcom/openagent-platform-backend/actions/workflows/ci.yml)
+OpenAgent Platform 是一个面向 Coding Agent 的多模型评测平台：用户粘贴源码和需求，后端自动分析任务难度并生成评测草稿，用户确认后选择多个模型同时运行，最后在控制台里横向比较结果、证据、历史和成本。
 
-FastAPI backend for service-wrapping OpenAgent Harness. The Harness executes coding-agent tasks; this Platform layer manages tasks, async runs, state, artifacts, idempotency, rate limiting, cache policy, and cost metrics.
+这个仓库重点展示的是 Platform 层：FastAPI 控制面、SQLAlchemy 数据面、异步 worker/队列、Harness 执行集成、artifact 回写、历史评测管理、成本统计和中文前端控制台。
 
-## Demo Evidence
+## 一句话定位
 
-| Area | Current Evidence |
-|---|---:|
-| Automated tests | backend `52 passed`, frontend `22 passed` |
-| Run states | `pending`, `running`, `pass`, `fail`, `timeout`, `cancelled` |
-| Artifact endpoints | 5 run artifacts + cost metrics |
-| Cost fields | prompt/completion/total tokens + estimated USD |
-| Local safety | SQLite + in-memory cache/rate-limit fallback |
-| Real-call guard | default backend gate + request opt-in + local key + budget cap |
-| Process cancel | run status + Harness subprocess termination |
-| Evaluation UI | scripted baseline + guarded DeepSeek + retry profile |
+我不是做了一个“接入几个大模型的页面”，而是把 Coding Agent 的执行过程工程化成可复现、可比较、可追踪的评测系统。
 
-Highest-priority interview evidence:
-
-1. Console screenshot after a `scripted baseline` run: status, mode, model, harness id, score, and artifact links.
-2. `GET /runs/{id}` JSON for the same run: timestamps, status, and artifact links.
-3. `/runs/{id}/report` or `/scorecard` screenshot: inspectable agent output.
-4. `/evaluation/summary` screenshot or JSON: profile comparison, task-level table, failure distribution, and cost totals.
-
-Reference Harness smoke:
-
-| Task | Profile | Result | Tokens | Estimated Cost |
-|---|---|---|---:|---:|
-| HTTP 429 retry fix | `scripted baseline` | pass | 0 | `$0.00000` |
-
-## Quantitative Evaluation Evidence
-
-The console now leads with an Evaluation Dashboard instead of a single run view. The goal is to compare execution strategies on the same benchmark surface:
-
-| Profile | Purpose | Cost posture |
-|---|---|---|
-| `scripted baseline` | deterministic local zero-cost baseline | no model call |
-| `DeepSeek API` | real model evidence for the same agent workflow | guarded by `ALLOW_REAL_LLM_CALLS` and 1 CNY cap |
-| `retry with context` | failure-aware retry after inspecting prior artifacts | guarded by the same real-call budget |
-
-Dashboard metrics:
-
-```json
-{
-  "total": 10,
-  "passed": 10,
-  "failed": 0,
-  "pass_rate": 1.0,
-  "avg_score": 96.5,
-  "total_patch_lines": 182,
-  "total_cost_usd": 0.00066,
-  "failure_types": {
-    "None": 10,
-    "NoPatch": 0,
-    "TestFailed": 0,
-    "ScopeViolation": 0
-  }
-}
-```
-
-Live API:
+主流程：
 
 ```text
-GET /evaluation/summary
+粘贴源码和目标
+  -> 后端判断难度并生成评测草稿
+  -> 用户确认或二次修改
+  -> 选择 DeepSeek / NewAPI 5.4 / NewAPI 5.5 等模型
+  -> 创建一个 Evaluation，下挂多个 Run
+  -> Worker 调 Harness 执行
+  -> 回写 patch / test-result / trace / scorecard / report / usage
+  -> Dashboard 展示结果矩阵、历史、失败原因和成本
 ```
 
-The response includes:
+## 当前主功能
 
-- `summary`: benchmark totals, pass rate, average score, patch size, changed files, tests, failure distribution, tokens, cost, and duration.
-- `profiles`: side-by-side comparison for local baseline, DeepSeek API, and retry strategy.
-- `tasks`: one row per benchmark/run with `task_id`, `profile`, `status`, `score`, `patch_lines`, `changed_files`, `tests_passed`, `cost`, `failure_type`, and `report_link`.
-- `retry_comparisons`: first attempt status, retry status, fail-to-pass flag, retry cost, retry patch lines, and failure-type changes.
+- 源码分析：`POST /evaluation-drafts` 调用 `CodeDifficultyAnalyzer`，后端判断 `easy | medium | hard`，返回原因、风险因素和推荐执行策略。
+- 多模型评测：`POST /evaluations` 一次创建一个 Evaluation 和多个 model run，同一任务横向对比。
+- 历史管理：`GET /evaluations/history` 按评测任务聚合 run，可查看状态、模型、失败类型、最佳结果和成本。
+- 结果矩阵：`GET /evaluations/{evaluation_id}/matrix` 展示单次评测下 task × model 的结构化结果。
+- Artifact 证据：每个 run 暴露 report、patch、scorecard、test-result、trace、agent-run/source。
+- 异步执行：本地 demo 用 `BackgroundTasks`，生产化路径可切到 `QueueBackend + Worker`。
+- Redis 队列：`QUEUE_BACKEND=redis` 支持 API 入队、worker 出队、DB 原子抢占。
+- 成本统计：`GET /metrics/cost` 按平台模型标签统计 token 与估算成本，重点展示 `DeepSeek API`、`NewAPI 5.4`、`NewAPI 5.5`。
+- 中文控制台：前端围绕 Dashboard、New Evaluation、History/Runs、Evidence、Cost 展开，不要求用户理解 Harness 内部文件。
 
-Reproduce locally:
+## 用户不会看到什么
 
-```powershell
-.\Start_OpenAgent_Demo.bat
-```
+主产品口径里不再强调：
 
-Then open the console and click:
+- Harness CLI
+- 手写 `task.json`
+- 手写 `profiles.json`
+- allowlist 细节
+- 多租户表结构
+- local scripted 作为主对比模型
 
-1. `Evaluation` -> `Refresh dashboard`
-2. `Run Control` -> profile `scripted baseline` -> `Start evaluation`
-3. Return to `Evaluation` -> `Refresh dashboard`
-4. Optional only after preflight: `DeepSeek API` or `Retry with context`
+这些仍然是系统内部实现或本地 fallback，但不是面向用户的主入口。对用户只讲：源码、任务、模型、评测、证据、历史、成本。
 
-Interview line:
-
-> I do not just show one successful agent run. I run different execution strategies against the same benchmark surface and compare pass rate, cost, patch size, changed files, failure type, trace, scorecard, and report links.
+## 架构分层
 
 ```mermaid
 flowchart LR
-    U["POST /runs"] --> I["Idempotency-Key"]
-    I --> R["Rate limit"]
-    R --> P["pending run"]
-    P --> W["worker / BackgroundTasks"]
+    U["用户粘贴源码/目标"] --> FE["React 中文控制台"]
+    FE --> API["FastAPI 控制面"]
+    API --> DB["SQLAlchemy / SQLite"]
+    API --> Q["BackgroundTasks 或 QueueBackend"]
+    Q --> W["Worker"]
     W --> H["OpenAgent Harness"]
-    H --> A["artifacts"]
-    A --> S["status + usage"]
-    S --> M["/metrics/cost"]
-    A --> Q["report / patch / scorecard / trace"]
+    H --> LLM["DeepSeek / NewAPI / OpenAI-compatible"]
+    H --> ART["Artifacts"]
+    ART --> API
+    API --> FE
 ```
 
-## Scope
+| 层 | 作用 | 主要文件 |
+|---|---|---|
+| 前端展示层 | 中文工作台、评测创建、历史、证据、成本 | `frontend/src/App.tsx`, `frontend/src/api.ts` |
+| API 控制面 | 创建 draft/evaluation/run，查询历史和 artifact | `app/main.py`, `app/schemas.py` |
+| 业务服务层 | 生成任务、幂等、成本、历史矩阵、难度分析 | `app/services.py`, `app/difficulty_analyzer.py` |
+| 数据面 | Task、Evaluation、Run、Usage、Workspace | `app/models.py`, `app/db.py` |
+| 队列/worker | DB fallback、Redis queue、原子抢占、取消/跳过 | `app/run_queue.py`, `app/worker.py` |
+| 执行面 | 调用 Harness，本地或 Docker executor | `app/harness_client.py` |
+| 证据面 | patch、report、scorecard、trace、test-result | `artifacts/`, `/runs/{id}/...` |
 
-```text
-OpenAgent Harness  = coding-agent execution, patch, tests, trace, report
-Platform Backend   = API control plane, worker, state, artifacts, cost governance
-```
+## 关键接口
 
-The backend never stores API keys and never reimplements the agent loop. It calls the Harness CLI through subprocess:
+| API | 用途 |
+|---|---|
+| `POST /evaluation-drafts` | 用户粘贴源码后，后端生成评测草稿和难度判断 |
+| `POST /evaluations` | 创建一次多模型评测 |
+| `GET /evaluations/history` | 历史评测管理 |
+| `GET /evaluations/{id}/matrix` | 单次评测结果矩阵 |
+| `GET /runs` | run 目录 |
+| `GET /runs/{id}` | run 详情 |
+| `POST /runs/{id}/retry` | 失败后带上下文重试 |
+| `POST /runs/{id}/cancel` | 取消 pending/running run |
+| `GET /runs/{id}/report` | 模型执行报告 |
+| `GET /runs/{id}/patch` | 代码修改 diff |
+| `GET /runs/{id}/scorecard` | 评分与失败类型 |
+| `GET /runs/{id}/test-result` | pytest 输出 |
+| `GET /runs/{id}/trace` | Agent 原始轨迹 |
+| `GET /runs/{id}/agent-run` | Agent loop 策略和步骤 |
+| `GET /metrics/cost` | 模型成本聚合 |
+| `GET /demo/status` | 当前 demo runtime 状态 |
 
-```bash
-python -m openagent_harness.cli run <task.json> --mode local --model scripted --runs ./artifacts/harness_runs
-```
+## 本地启动
 
-`harness_task_path` is constrained to `HARNESS_ROOT`. Relative task paths are resolved under `HARNESS_ROOT`; absolute task paths must already be inside that directory. This prevents the API from being used to point the Harness at arbitrary local files.
-
-Related repository:
-
-- OpenAgent Harness: https://github.com/huangpengtao00-dotcom/openagent-harness
-
-## Run Locally
+后端：
 
 ```powershell
 python -m venv .venv
@@ -130,39 +103,11 @@ python -m venv .venv
 python -m pip install --upgrade pip
 pip install -e .[dev]
 copy .env.example .env
-pytest -q
+python -m pytest -q
 uvicorn app.main:app --reload
 ```
 
-If `pytest -q` reports `cannot import name 'command' from 'alembic'`, the virtualenv is missing the Alembic dependency and Python is importing the local `alembic/` migration folder instead. Re-run `pip install -e .[dev]` in the active virtualenv before retrying.
-
-Open:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-## Platform Console
-
-The optional frontend console lives in `frontend/`. It is a lightweight React/Vite UI for showing Platform evidence: architecture boundary, run state, cancellation, artifacts, and cost metrics. It does not store API keys or call LLM providers directly.
-
-Static presentation mode:
-
-```powershell
-cd frontend
-npm install
-npm run build
-```
-
-Then open:
-
-```text
-frontend/dist/index.html
-```
-
-The built HTML uses relative assets, so it can be opened directly like a static zip demo. In this mode it shows built-in sample data and does not require the backend.
-
-Live API mode:
+前端：
 
 ```powershell
 cd frontend
@@ -170,187 +115,103 @@ npm install
 npm run dev
 ```
 
-Open:
+打开：
 
 ```text
 http://127.0.0.1:5173
 ```
 
-The Vite dev server proxies `/api/*` to `http://127.0.0.1:8000/*`, so start the FastAPI backend separately when using live API actions. Without the backend, the console still opens with demo data for presentation.
-
-One-command local demo:
-
-Double-click:
-
-```text
-Start_OpenAgent_Demo.bat
-```
-
-Or run from PowerShell:
+一键 demo：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_demo.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_demo.ps1 -NoBrowser -KeepDemoData
 ```
 
-This starts the FastAPI backend and the Vite Console in separate terminals, opens `http://127.0.0.1:5173`, and enables guarded real model calls with `ALLOW_REAL_LLM_CALLS=true`. A provider key such as `DEEPSEEK_API_KEY` is still required, and the backend budget gate remains active.
+## 队列与 Worker
 
-The live Console run page includes evaluation profiles:
+本地默认：
 
-- `scripted baseline`: zero-cost baseline for stable interview demos.
-- `DeepSeek API`: guarded real model path, disabled unless server and request both opt in.
-- `retry with context`: creates a retry run from the current failed run and folds it into the evaluation dashboard.
-
-## API Smoke
-
-```powershell
-$task = @{
-  name = "retry-429-real"
-  description = "Fix HTTP 429 retry logic"
-  harness_task_path = "benchmarks_realistic/retry-429-real/task.json"
-} | ConvertTo-Json
-
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/tasks -ContentType "application/json" -Body $task
-
-$run = @{
-  task_id = 1
-  mode = "local"
-  model = "scripted"
-  allow_llm_calls = $false
-  timeout_seconds = 120
-} | ConvertTo-Json
-
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/runs -Headers @{"Idempotency-Key"="demo-001"} -ContentType "application/json" -Body $run
-Invoke-RestMethod http://127.0.0.1:8000/runs/1
+```env
+AUTO_START_RUNS=true
+QUEUE_BACKEND=db
 ```
 
-Artifact endpoints:
-
-```text
-GET /runs/{run_id}/report
-GET /runs/{run_id}/patch
-GET /runs/{run_id}/scorecard
-GET /runs/{run_id}/test-result
-GET /runs/{run_id}/trace
-GET /metrics/cost
-POST /runs/{run_id}/cancel
-```
-
-`POST /runs/{run_id}/cancel` marks pending/running runs as `cancelled`. In local BackgroundTasks mode, the API process registry can terminate the active Harness subprocess directly. In API/worker split mode, the worker polls the database while the subprocess is running and terminates its own Harness process as soon as it observes cancellation. In a multi-machine production deployment, the same idea should move to the queue/worker control layer.
-
-## Database Migrations
-
-Local tests can still create tables directly through SQLAlchemy metadata, but the operational schema path is Alembic:
-
-```powershell
-alembic upgrade head
-```
-
-The baseline migration creates `tasks`, `runs`, and `usage`, including the idempotency constraint and `timeout_seconds`.
-
-## Real DeepSeek Mode
-
-Real calls require both:
-
-1. local environment contains `DEEPSEEK_API_KEY`
-2. Platform env sets `ALLOW_REAL_LLM_CALLS=true`
-3. request body sets `"mode": "api"` and `"allow_llm_calls": true`
-
-Real spending is bounded by request opt-in, a local provider key, the backend budget gate, rate limiting, and timeout handling. Do not commit `.env`.
-
-For manual demos, keep total real API smoke spending under `REAL_API_BUDGET_LIMIT_CNY` (default `1.0` CNY). A single `deepseek-v4-flash` realistic task is expected to be tiny, but check `/metrics/cost` and `/evaluation/summary` after every real run.
-
-## Scripted Mode vs API Mode
-
-Use scripted mode for stable demos, interviews, and CI:
-
-```json
-{
-  "mode": "local",
-  "model": "scripted",
-  "allow_llm_calls": false
-}
-```
-
-Scripted mode does not call a model provider. It exercises the same Platform control flow and Harness artifact flow, but keeps cost at zero and avoids API-key risk.
-
-Use API mode only for explicit low-budget smoke tests:
-
-```json
-{
-  "mode": "api",
-  "model": "deepseek-v4-flash",
-  "allow_llm_calls": true
-}
-```
-
-API mode needs `ALLOW_REAL_LLM_CALLS=true` and a local provider key such as `DEEPSEEK_API_KEY`. Keep keys in local environment or `.env`; never send them through request bodies, never store them in the database, and never commit them. `RunCreate.mode` only accepts `"local"` or `"api"`.
-
-## Release Bundles
-
-Build two local handoff folders:
-
-```powershell
-.\scripts\build_clean_release.ps1
-```
-
-Output:
-
-```text
-C:\Users\hpt\Documents\实习项目\OpenAgent-Release-Bundles\openagent-platform-runnable
-C:\Users\hpt\Documents\实习项目\OpenAgent-Release-Bundles\openagent-platform-interview-clean
-```
-
-Both bundles exclude `.env`, `.venv`, `node_modules`, `runs`, `artifacts`, local databases, `.git`, zip files, logs, and cache directories. The runnable bundle includes backend and Harness source for local setup; the interview-clean bundle is the safer folder to share or zip.
-
-## Worker Mode
-
-For local demos, `AUTO_START_RUNS=true` lets FastAPI schedule runs with `BackgroundTasks`. For a more production-like split, set:
+API/worker 分离：
 
 ```env
 AUTO_START_RUNS=false
+QUEUE_BACKEND=redis
+REDIS_URL=redis://localhost:6379/0
+RUN_QUEUE_KEY=openagent:runs
 ```
 
-Then start the API and worker separately:
+启动 worker：
 
 ```powershell
-uvicorn app.main:app --reload
 python -m app.worker
 ```
 
-In this mode, `POST /runs` only writes a pending run. The worker polls pending runs and executes Harness subprocesses.
+Redis List 版本是 MVP：它能展示 API 入队、worker 消费、DB 状态回查、取消跳过、重复入队安全和 `pending -> running` 原子抢占。它还不是强可靠队列，worker pop 后崩溃可能丢失该队列项。生产化路线是 Redis Streams、processing queue、retry scanner 和 dead-letter。
 
-For a containerized API/worker/Redis split:
+## 主展示模型
+
+明天演示优先讲这三个：
+
+- DeepSeek API
+- NewAPI 5.4
+- NewAPI 5.5
+
+`local scripted` 只作为本地零成本 fallback，不作为能力对比重点。`fighting` 是历史遗留的 OpenAI-compatible provider，可放到“其他接口”里，不作为主线。
+
+## Benchmark 与模板
+
+展示用模板：
+
+- `docs/benchmarks/demo_templates_5_copy_paste.md`
+
+15 个任务目录：
+
+- `docs/benchmarks/benchmark_catalog_15_tasks_2026-06-25.md`
+- `benchmark_templates/benchmark_catalog_15.json`
+
+检查难度分类：
 
 ```powershell
-copy .env.example .env
-# Set HOST_HARNESS_ROOT to your local Harness checkout.
-docker compose up --build
+powershell -ExecutionPolicy Bypass -File .\scripts\check_benchmark_templates.ps1
 ```
 
-## Verification
+## 验证记录
 
-```powershell
-pytest -q
-```
-
-Expected result:
+最近验证：
 
 ```text
-52 passed
+backend: python -m pytest -q
+101 passed, 1 warning
+
+frontend: npm.cmd test -- --run
+5 test files passed, 39 tests passed
+
+frontend build: npm.cmd run build
+passed
 ```
 
-The tests cover health, idempotent run creation, artifact serving, path sandboxing, rate limiting, cache jitter, cost parsing, timeout classification, worker execution, evaluation summary aggregation, default Harness path discovery, and metrics aggregation.
+## 面试材料
 
-## Cache Backend
+主入口只看这几份：
 
-With `ENABLE_REDIS=false`, cache and rate limiting use in-memory fallbacks for local demos. With `ENABLE_REDIS=true`, rate limiting and cache reads/writes use Redis; if Redis is unavailable, the service falls back to memory so local startup still works.
+- `docs/面试统一口径_2026-06-25.md`
+- `docs/OpenAgent_项目学习知识库_架构技术栈_2026-06-25.md`
+- `docs/evaluation_workspace_flow.md`
+- `docs/backend_design.md`
+- `docs/benchmarks/demo_templates_5_copy_paste.md`
 
-## Interview Materials
+旧口径、旧演示材料和早期证据已归档到：
 
-- `docs/architecture_diagram.md`
-- `docs/coding_agent_evaluation.md`
-- `docs/demo_evidence.md`
-- `docs/demo_walkthrough.md`
-- `docs/one_command_demo.md`
-- `docs/deepseek_evidence_workflow.md`
-- `docs/interview_playbook_cn.md`
+- `docs/_archive_legacy_20260625/`
+
+## 当前边界
+
+- 这是面试级工程系统，不宣称完整生产级 SaaS。
+- 账号登录尚未接入，当前 tenant/workspace 是后端数据隔离基础，未来由登录账号自动映射。
+- Redis List 队列是 MVP，不宣称 crash-safe。
+- Docker executor 已有路径，但明天主讲重点应放在 Evaluation 闭环、worker/queue、artifact 证据、历史和成本。

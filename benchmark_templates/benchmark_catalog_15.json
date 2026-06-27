@@ -1,0 +1,17 @@
+[
+  {"id":"E1","difficulty":"easy","name":"Duration parser","source_filename":"duration_parser.py","goal":"支持秒、分钟、小时字符串解析，非法输入返回 0。"},
+  {"id":"E2","difficulty":"easy","name":"Percent clamp","source_filename":"metrics.py","goal":"把百分比限制在 0 到 100，None 返回 0。"},
+  {"id":"E3","difficulty":"easy","name":"Slug normalize","source_filename":"slugify.py","goal":"把标题转成小写短横线 slug，去掉重复分隔符。"},
+  {"id":"E4","difficulty":"easy","name":"Retryable status","source_filename":"retry_policy.py","goal":"只有 429、500、502、503 可重试，其余状态不可重试。"},
+  {"id":"E5","difficulty":"easy","name":"Pagination bounds","source_filename":"pager.py","goal":"修复分页 off-by-one 和 page_size 边界。"},
+  {"id":"M1","difficulty":"medium","name":"Config merge","source_filename":"config_loader.py","goal":"嵌套配置合并，不能修改 DEFAULTS。"},
+  {"id":"M2","difficulty":"medium","name":"Role policy evaluator","source_filename":"policy.py","goal":"根据角色、资源 owner、feature flag 返回 allow/deny 和原因。"},
+  {"id":"M3","difficulty":"medium","name":"Artifact search filters","source_filename":"artifact_search.py","goal":"支持状态/tag/分页过滤，缺字段不崩。"},
+  {"id":"M4","difficulty":"medium","name":"Usage cost rollup","source_filename":"cost_rollup.py","goal":"按 provider 聚合 token 和 cost，保留零成本行。"},
+  {"id":"M5","difficulty":"medium","name":"Idempotency key validator","source_filename":"idempotency.py","goal":"重复请求返回已有结果，不同 payload 返回 conflict。"},
+  {"id":"H1","difficulty":"hard","name":"Async retry client","source_filename":"async_client.py","goal":"异步 HTTP 重试，处理 429、timeout、非 2xx 和 JSON 返回。"},
+  {"id":"H2","difficulty":"hard","name":"Worker queue claim","source_filename":"worker_queue.py","goal":"pending 到 running 原子抢占，重复入队、取消、完成要跳过。"},
+  {"id":"H3","difficulty":"hard","name":"Artifact path resolver","source_filename":"artifact_resolver.py","goal":"安全解析 artifact 路径，防 traversal，缺文件返回结构化错误。"},
+  {"id":"H4","difficulty":"hard","name":"Multi-file evaluation routing","source_filename":"routes/evaluation.py","goal":"跨 router/service/storage 的 evaluation 创建和结果查询。"},
+  {"id":"H5","difficulty":"hard","name":"Cost dashboard reconciliation","source_filename":"cost_dashboard.py","goal":"后端 provider 成本聚合和前端展示一致，特别是 newapi-5.4/5.5。"}
+]

@@ -28,7 +28,7 @@ $excludedDirs = @(
     "runs_deepseek_real",
     "artifacts",
     "test_artifacts",
-    ".*_tmp"
+    ".codex_tmp"
 )
 
 $excludedFiles = @(

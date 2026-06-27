@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCustomTask, createRun, getDemoStatus, getRunSource, listRuns, retryRun } from "./api";
+import { createCustomTask, createRun, deleteEvaluation, getApiWorkspaceContext, getArtifact, getDemoState, getDemoStatus, getEvaluationMatrix, getEvaluationMemorySummary, getRunSource, listRuns, retryRun, setApiWorkspaceContext } from "./api";
 
 describe("api request headers", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    setApiWorkspaceContext({ tenantId: "default", workspaceId: "default" });
   });
 
   it("preserves JSON content type when createRun adds an idempotency key", async () => {
@@ -37,6 +38,67 @@ describe("api request headers", () => {
         headers: expect.objectContaining({
           "Content-Type": "application/json",
           "Idempotency-Key": "console-eval-api-retry-429",
+        }),
+      }),
+    );
+  });
+
+  it("attaches the active tenant and workspace headers to JSON requests", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: "ok",
+        app_env: "dev",
+        database: "sqlite:///demo.db",
+        harness_root: "C:/bundle/02_OpenAgent_Harness",
+        harness_exists: true,
+        harness_runs_root: "C:/bundle/artifacts/harness_runs",
+        harness_executor: "local",
+        harness_docker_image: "openagent-harness:latest",
+        allow_real_llm_calls: false,
+        real_api_budget_limit_cny: 1,
+        auto_start_runs: true,
+        queue_backend_configured: "db",
+        queue_backend_active: "db",
+        queue_key: "openagent:runs",
+        queue_depth: null,
+        redis_enabled: false,
+        redis_url: "redis://localhost:6379/0",
+        redis_available: false,
+      }),
+    } as Response);
+
+    setApiWorkspaceContext({ tenantId: "team-a", workspaceId: "alpha" });
+    expect(getApiWorkspaceContext()).toEqual({ tenantId: "team-a", workspaceId: "alpha" });
+    await getDemoStatus();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/demo/status",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-Tenant-ID": "team-a",
+          "X-Workspace-ID": "alpha",
+        }),
+      }),
+    );
+  });
+
+  it("attaches workspace headers when loading text artifacts", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      text: async () => "diff --git a/app.py b/app.py\n",
+    } as Response);
+
+    setApiWorkspaceContext({ tenantId: "team-b", workspaceId: "experiments" });
+    const patch = await getArtifact(12, "patch");
+
+    expect(patch).toContain("diff --git");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/12/patch",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-Tenant-ID": "team-b",
+          "X-Workspace-ID": "experiments",
         }),
       }),
     );
@@ -81,13 +143,19 @@ describe("api request headers", () => {
       }),
     } as Response);
 
-    await retryRun(42, { allow_llm_calls: true, timeout_seconds: 120 });
+    await retryRun(42, { allow_llm_calls: true, timeout_seconds: 120, use_failure_context: true });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/runs/42/retry",
       expect.objectContaining({
         method: "POST",
         body: expect.stringContaining('"allow_llm_calls":true'),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/42/retry",
+      expect.objectContaining({
+        body: expect.stringContaining('"use_failure_context":true'),
       }),
     );
   });
@@ -119,6 +187,61 @@ describe("api request headers", () => {
     );
   });
 
+  it("loads evaluation memory summary for the lightweight memory panel", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        total_records: 3,
+        passed_records: 2,
+        failed_records: 1,
+        retry_records: 1,
+        retry_successes: 1,
+        fail_to_pass_rate: 1,
+        failure_types: { None: 2, TestFailed: 1 },
+        top_tasks: [{ task_name: "retry-429-real", total: 2, passed: 1, failed: 1, last_run_id: 3 }],
+        recent_items: [],
+      }),
+    } as Response);
+
+    const summary = await getEvaluationMemorySummary();
+
+    expect(summary.retry_successes).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/memory/evaluation/summary",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("loads live demo state for occupied ids", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: "ok",
+        database: "sqlite:///./artifacts/interview_demo.db",
+        generated_at: "2026-06-20T10:00:00Z",
+        tasks: { count: 2, min_id: 1, max_id: 2, ids: [1, 2] },
+        runs: { count: 1, min_id: 1, max_id: 1, ids: [1] },
+        latest_runs: [],
+      }),
+    } as Response);
+
+    const state = await getDemoState();
+
+    expect(state.tasks.ids).toEqual([1, 2]);
+    expect(state.runs.count).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/demo/state",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
   it("loads the run catalog from the backend", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
@@ -150,7 +273,7 @@ describe("api request headers", () => {
 
     expect(runs[0].task_name).toBe("retry-429-real");
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/runs",
+      "/api/runs?limit=200",
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",
@@ -181,5 +304,51 @@ describe("api request headers", () => {
         }),
       }),
     );
+  });
+
+  it("deletes evaluation tasks through the management endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "deleted", task_id: 23, deleted_runs: 3, deleted_usage: 1 }),
+    } as Response);
+
+    const result = await deleteEvaluation(23);
+
+    expect(result.deleted_runs).toBe(3);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/evaluations/23",
+      expect.objectContaining({
+        method: "DELETE",
+      }),
+    );
+  });
+
+  it("loads an evaluation result matrix", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        evaluation_id: 9,
+        name: "matrix demo",
+        goal: "compare models",
+        status: "partial",
+        task_count: 1,
+        model_count: 2,
+        run_count: 2,
+        passed: 1,
+        failed: 1,
+        pending: 0,
+        running: 0,
+        pass_rate: 0.5,
+        total_tokens: 1200,
+        estimated_cost_usd: 0.02,
+        created_at: "2026-06-24T12:00:00",
+        tasks: [],
+      }),
+    } as Response);
+
+    const matrix = await getEvaluationMatrix(9);
+
+    expect(matrix.evaluation_id).toBe(9);
+    expect(fetchMock).toHaveBeenCalledWith("/api/evaluations/9/matrix", expect.any(Object));
   });
 });

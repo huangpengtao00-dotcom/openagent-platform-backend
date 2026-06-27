@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db import Base
 from app.harness_client import HarnessRunResult
 from app.models import Run, RunStatus, Task
+from app.run_queue import DBPollingQueueBackend, RedisQueueBackend, RedisRunQueue
 from app.services import cancel_run, execute_run
 from app.worker import Worker, process_next_run
 
@@ -49,6 +50,27 @@ def seed_pending_run(session_factory):
     return run_id
 
 
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: list[str] = []
+
+    def rpush(self, key: str, value: str) -> None:
+        self.values.append(value)
+
+    def blpop(self, key: str, timeout: int = 0):
+        if not self.values:
+            return None
+        return (key, self.values.pop(0))
+
+    def lpop(self, key: str):
+        if not self.values:
+            return None
+        return self.values.pop(0)
+
+    def llen(self, key: str) -> int:
+        return len(self.values)
+
+
 def test_process_next_run_executes_oldest_pending_run(tmp_path: Path, monkeypatch):
     session_factory = make_session(tmp_path)
     run_id = seed_pending_run(session_factory)
@@ -66,12 +88,103 @@ def test_process_next_run_executes_oldest_pending_run(tmp_path: Path, monkeypatc
     db.close()
 
 
+def test_db_polling_queue_backend_keeps_legacy_pending_scan(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    run_id = seed_pending_run(session_factory)
+    queue = DBPollingQueueBackend()
+
+    queue.enqueue(run_id)
+
+    assert queue.dequeue(session_factory) == run_id
+    assert queue.depth() is None
+
+
 def test_worker_run_once_returns_false_when_no_pending_runs(tmp_path: Path):
     session_factory = make_session(tmp_path)
     fake = FakeHarnessClient(tmp_path / "artifacts" / "worker-run")
     worker = Worker(session_factory=session_factory, harness_client=fake, harness_runs_root=tmp_path / "artifacts")
 
     assert worker.run_once() is False
+
+
+def test_redis_run_queue_dequeues_pending_run_fifo(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    first = seed_pending_run(session_factory)
+    second = seed_pending_run(session_factory)
+    redis_client = FakeRedis()
+    queue = RedisRunQueue(client=redis_client, key="test:runs")
+
+    queue.enqueue(first)
+    queue.enqueue(second)
+
+    assert queue.dequeue(session_factory) == first
+    assert queue.dequeue(session_factory) == second
+
+
+def test_redis_queue_backend_enqueue_dequeue_and_depth(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    run_id = seed_pending_run(session_factory)
+    redis_client = FakeRedis()
+    queue = RedisQueueBackend(client=redis_client, key="test:runs")
+
+    queue.enqueue(run_id)
+
+    assert queue.depth() == 1
+    assert queue.dequeue(session_factory) == run_id
+    assert queue.depth() == 0
+
+
+def test_redis_run_queue_skips_cancelled_or_completed_run_ids(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    cancelled = seed_pending_run(session_factory)
+    pending = seed_pending_run(session_factory)
+    db = session_factory()
+    run = db.get(Run, cancelled)
+    run.status = RunStatus.cancelled.value
+    db.commit()
+    db.close()
+    redis_client = FakeRedis()
+    queue = RedisRunQueue(client=redis_client, key="test:runs")
+
+    queue.enqueue(cancelled)
+    queue.enqueue("not-an-int")
+    queue.enqueue(pending)
+
+    assert queue.dequeue(session_factory) == pending
+
+
+def test_duplicate_enqueue_does_not_execute_run_twice(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    run_id = seed_pending_run(session_factory)
+    fake = FakeHarnessClient(tmp_path / "artifacts" / "worker-run")
+    redis_client = FakeRedis()
+    queue = RedisQueueBackend(client=redis_client, key="test:runs")
+    queue.enqueue(run_id)
+    queue.enqueue(run_id)
+
+    first = process_next_run(session_factory, fake, harness_runs_root=tmp_path / "artifacts", run_queue=queue)
+    second = process_next_run(session_factory, fake, harness_runs_root=tmp_path / "artifacts", run_queue=queue)
+
+    assert first == run_id
+    assert second is None
+    assert fake.calls == 1
+
+
+def test_cancelled_run_dequeued_by_worker_is_skipped(tmp_path: Path):
+    session_factory = make_session(tmp_path)
+    run_id = seed_pending_run(session_factory)
+    db = session_factory()
+    cancel_run(db, run_id)
+    db.close()
+    fake = FakeHarnessClient(tmp_path / "artifacts" / "should-not-run")
+    redis_client = FakeRedis()
+    queue = RedisQueueBackend(client=redis_client, key="test:runs")
+    queue.enqueue(run_id)
+
+    processed = process_next_run(session_factory, fake, harness_runs_root=tmp_path / "artifacts", run_queue=queue)
+
+    assert processed is None
+    assert fake.calls == 0
 
 
 def test_execute_run_marks_subprocess_timeout_as_timeout(tmp_path: Path):
