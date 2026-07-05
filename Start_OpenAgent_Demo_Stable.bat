@@ -26,7 +26,7 @@ echo [OpenAgent] API:      http://127.0.0.1:8000
 echo [OpenAgent] Frontend: http://127.0.0.1:5173
 echo.
 echo If the browser did not open automatically, open http://127.0.0.1:5173/ in Edge.
-echo Do not open the demo inside Codex's in-app browser for the interview.
+echo Do not open the demo inside Codex's in-app browser.
 echo.
 pause
 endlocal

@@ -169,7 +169,7 @@ describe("api request headers", () => {
         harness_exists: true,
         allow_real_llm_calls: false,
         real_api_budget_limit_cny: 1.0,
-        harness_runs_root: "C:/bundle/artifacts/interview_demo_runs",
+        harness_runs_root: "C:/bundle/artifacts/demo_runs",
       }),
     } as Response);
 
@@ -221,7 +221,7 @@ describe("api request headers", () => {
       ok: true,
       json: async () => ({
         status: "ok",
-        database: "sqlite:///./artifacts/interview_demo.db",
+        database: "sqlite:///./artifacts/demo.db",
         generated_at: "2026-06-20T10:00:00Z",
         tasks: { count: 2, min_id: 1, max_id: 2, ids: [1, 2] },
         runs: { count: 1, min_id: 1, max_id: 1, ids: [1] },

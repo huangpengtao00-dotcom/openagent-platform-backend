@@ -137,6 +137,6 @@ API/worker 分离：
 
 Redis 当前是 List MVP。它能证明 API/worker 边界和重复入队安全，但不是 crash-safe。生产版要升级 Redis Streams、processing queue、ack/retry/dead-letter。
 
-## 面试讲法
+## 一句话讲法
 
-> 我把产品边界从 Harness 命令上移到 Evaluation。用户提交源码、目标和模型集合一次，平台自动生成 Harness 可执行任务，拆成多个模型 run，并把 patch、测试、trace、scorecard、成本和历史聚合成一个结果矩阵。这样面试官看到的不是单次模型调用，而是一个可复现、可对比、可追踪的 Coding Agent 评测系统。
+> 我把产品边界从 Harness 命令上移到 Evaluation。用户提交源码、目标和模型集合一次，平台自动生成 Harness 可执行任务，拆成多个模型 run，并把 patch、测试、trace、scorecard、成本和历史聚合成一个结果矩阵。这样评审者看到的不是单次模型调用，而是一个可复现、可对比、可追踪的 Coding Agent 评测系统。

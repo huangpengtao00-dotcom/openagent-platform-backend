@@ -351,7 +351,7 @@ describe("App simplified evaluation flow", () => {
         model: "deepseek-v4-flash",
         timeout_seconds: 180,
         harness_run_id: "retry-429-real-failed",
-        artifacts_dir: "artifacts/interview_demo_runs/retry-429-real-failed",
+        artifacts_dir: "artifacts/demo_runs/retry-429-real-failed",
         failure_type: "Regression",
         error_message: "pytest failed",
         created_at: "2026-06-21T12:00:00",

@@ -12,7 +12,7 @@ OpenAgent Harness
   负责：Agent loop、读取代码、修改代码、运行 pytest、生成 patch/trace/report/scorecard
 ```
 
-面试时不要把 Harness 细节当作用户入口讲。用户入口是 Evaluation，Harness 是执行引擎。
+对外讲解时，不要把 Harness 细节当作用户入口。用户入口是 Evaluation，Harness 是执行引擎。
 
 ## 数据模型
 
@@ -152,8 +152,8 @@ coalesce(Run.model_provider, Run.model, Usage.model)
 - SQLite 是本地 demo 默认数据库，生产可迁移 PostgreSQL。
 - Redis List 是异步队列 MVP，不是最终可靠队列。
 - tenant/workspace 是后端隔离基础，前端不应把“租户”作为用户操作概念。
-- Docker executor 已接入路径，但面试主线应先讲 Evaluation 闭环和证据闭环。
+- Docker executor 已接入路径，但讲解主线应先讲 Evaluation 闭环和证据闭环。
 
-## 面试讲法
+## 一句话讲法
 
 > 我把系统拆成控制面、数据面、调度面、执行面和证据面。控制面负责 Evaluation 和 Run 生命周期；数据面记录任务、状态和成本；调度面用 BackgroundTasks 或 QueueBackend 把长任务交给 worker；执行面由 Harness 完成 Agent loop；证据面把 patch、测试、trace、scorecard 和 report 回写给平台。这样项目不只是能调模型，而是能可靠地管理一次多模型评测的完整生命周期。

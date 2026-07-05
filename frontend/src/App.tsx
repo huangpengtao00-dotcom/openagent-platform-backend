@@ -489,7 +489,7 @@ function App() {
   const visibleProfiles = evaluationProfiles.filter((profile) => profile.id !== "retry-context");
 
   useEffect(() => {
-    setApiWorkspaceContext({ tenantId: "default", workspaceId: "interview-demo" });
+    setApiWorkspaceContext({ tenantId: "default", workspaceId: "demo" });
     void refreshDemoStatus(false);
     void handleRefreshDemoState(false);
     void handleRefreshRunCatalog(false);

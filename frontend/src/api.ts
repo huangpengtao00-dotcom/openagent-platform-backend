@@ -9,7 +9,7 @@ export type ApiWorkspaceContext = {
 
 let workspaceContext: ApiWorkspaceContext = {
   tenantId: "default",
-  workspaceId: "interview-demo",
+  workspaceId: "demo",
 };
 
 export function setApiWorkspaceContext(next: ApiWorkspaceContext): void {

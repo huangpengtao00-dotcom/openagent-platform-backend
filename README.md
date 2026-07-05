@@ -195,23 +195,15 @@ frontend build: npm.cmd run build
 passed
 ```
 
-## 面试材料
+## 文档索引
 
-主入口只看这几份：
-
-- `docs/面试统一口径_2026-06-25.md`
-- `docs/OpenAgent_项目学习知识库_架构技术栈_2026-06-25.md`
-- `docs/evaluation_workspace_flow.md`
-- `docs/backend_design.md`
-- `docs/benchmarks/demo_templates_5_copy_paste.md`
-
-旧口径、旧演示材料和早期证据已归档到：
-
-- `docs/_archive_legacy_20260625/`
+- `docs/evaluation_workspace_flow.md`：评测工作流与产品边界
+- `docs/backend_design.md`：后端设计与执行引擎分层
+- `docs/benchmarks/`：演示任务目录与模板
 
 ## 当前边界
 
-- 这是面试级工程系统，不宣称完整生产级 SaaS。
+- 这是演示级工程系统，不宣称完整生产级 SaaS。
 - 账号登录尚未接入，当前 tenant/workspace 是后端数据隔离基础，未来由登录账号自动映射。
 - Redis List 队列是 MVP，不宣称 crash-safe。
 - Docker executor 已有路径，但明天主讲重点应放在 Evaluation 闭环、worker/queue、artifact 证据、历史和成本。

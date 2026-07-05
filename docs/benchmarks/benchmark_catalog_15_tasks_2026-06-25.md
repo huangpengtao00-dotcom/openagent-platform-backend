@@ -1,6 +1,6 @@
 # OpenAgent Benchmark Catalog - 15 Tasks
 
-Purpose: provide interview-ready tasks across easy, medium, and hard code-difficulty levels. These tasks are meant for `New Evaluation`: paste source, let the backend judge difficulty, confirm draft, then run DeepSeek / NewAPI 5.4 / NewAPI 5.5 in parallel.
+Purpose: provide demo-ready tasks across easy, medium, and hard code-difficulty levels. These tasks are meant for `New Evaluation`: paste source, let the backend judge difficulty, confirm draft, then run DeepSeek / NewAPI 5.4 / NewAPI 5.5 in parallel.
 
 ## Easy
 
@@ -42,7 +42,7 @@ Use this sequence tomorrow:
 4. Run one selected task across DeepSeek / NewAPI 5.4 / NewAPI 5.5.
 5. Open History -> View Matrix -> Evidence to show patch, scorecard, trace, cost.
 
-Note: running all 15 tasks across all real models can trigger provider budget or 429 limits. For interview reliability, keep 15 tasks as the benchmark catalog and run 1-3 selected tasks live.
+Note: running all 15 tasks across all real models can trigger provider budget or 429 limits. For demo reliability, keep 15 tasks as the benchmark catalog and run 1-3 selected tasks live.
 
 ## Files
 
