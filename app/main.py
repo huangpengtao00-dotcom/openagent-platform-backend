@@ -191,14 +191,7 @@ def post_task(
         task = create_task(db, body, settings, workspace_id=workspace.id)
     except PermissionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return TaskOut(
-        task_id=task.id,
-        workspace_id=task.workspace_id,
-        name=task.name,
-        description=task.description,
-        harness_task_path=task.harness_task_path,
-        created_at=task.created_at,
-    )
+    return _task_out(task)
 
 
 @app.post("/custom-tasks", response_model=TaskOut)
@@ -213,14 +206,7 @@ def post_custom_task(
         task = create_custom_task(db, body, settings, workspace_id=workspace.id)
     except PermissionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return TaskOut(
-        task_id=task.id,
-        workspace_id=task.workspace_id,
-        name=task.name,
-        description=task.description,
-        harness_task_path=task.harness_task_path,
-        created_at=task.created_at,
-    )
+    return _task_out(task)
 
 
 @app.post("/evaluation-drafts", response_model=EvaluationDraftOut)
@@ -263,14 +249,7 @@ def post_evaluation(
             _dispatch_run(background_tasks, run.id, run.status)
     return EvaluationCreateOut(
         evaluation_id=evaluation.id,
-        task=TaskOut(
-            task_id=task.id,
-            workspace_id=task.workspace_id,
-            name=task.name,
-            description=task.description,
-            harness_task_path=task.harness_task_path,
-            created_at=task.created_at,
-        ),
+        task=_task_out(task),
         runs=[_run_out(run) for run in runs],
         next_steps=[
             "Open the run list to watch each model profile move from pending to pass/fail.",
@@ -681,6 +660,17 @@ def _run_out(run: Run) -> RunOut:
     )
     out.artifacts = artifact_links(run)
     return out
+
+
+def _task_out(task: Task) -> TaskOut:
+    return TaskOut(
+        task_id=task.id,
+        workspace_id=task.workspace_id,
+        name=task.name,
+        description=task.description,
+        harness_task_path=task.harness_task_path,
+        created_at=task.created_at,
+    )
 
 
 def _run_catalog_item(run: Run) -> RunCatalogItemOut:

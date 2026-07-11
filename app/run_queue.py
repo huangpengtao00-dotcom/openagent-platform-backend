@@ -29,6 +29,15 @@ class QueueBackend(Protocol):
 
 @dataclass
 class DBPollingQueueBackend:
+    """Queue backed by the ``runs`` table itself.
+
+    There is no separate queue structure: a ``pending`` row *is* a queued item, so
+    ``enqueue`` is a no-op and ``dequeue`` returns the oldest pending run id. The
+    actual claim is done atomically in ``execute_run``, which lets this backend be
+    crash-safe by construction (a worker dying before it claims a run simply leaves
+    the row ``pending`` for the next poll).
+    """
+
     name: str = "db"
 
     def enqueue(self, run_id: int) -> None:
@@ -67,6 +76,13 @@ class RedisQueueBackend:
             raise
 
     def dequeue(self, session_factory: SessionFactory) -> int | None:
+        """Pop run ids until one is still ``pending`` in the DB, else fall back.
+
+        Ids that were cancelled or already handled between enqueue and pop are
+        skipped (the DB, not the list, is the source of truth for run state). Any
+        Redis error, or an empty list, delegates to the DB polling fallback so the
+        worker keeps draining work even when Redis is unavailable.
+        """
         while True:
             try:
                 raw = self._pop_raw()

@@ -130,6 +130,14 @@ def create_evaluation_runs(
     workspace_id: int | None = None,
     idempotency_key: str | None = None,
 ) -> tuple[Evaluation, Task, list[Run], bool]:
+    """Create one evaluation and its per-profile runs as a single unit.
+
+    Returns ``(evaluation, task, runs, created)`` where ``created`` is False when
+    an existing evaluation was replayed via ``idempotency_key``. Rate limiting is
+    applied once for the whole submission (before any rows are written) so a
+    multi-profile evaluation cannot leave orphaned task/evaluation/run rows behind
+    if the limiter trips mid-way.
+    """
     if idempotency_key:
         existing = db.execute(
             select(Evaluation).where(
@@ -142,6 +150,10 @@ def create_evaluation_runs(
             if not task:
                 raise LookupError("evaluation task not found")
             return existing, task, sorted(task.runs, key=lambda item: item.id), False
+    # One evaluation submission counts as a single rate-limited action. Checking
+    # here (before any writes) keeps a tripped limiter from persisting a partial
+    # evaluation, and the per-run checks below are disabled to match.
+    limiter.check(f"runs:{user_id}")
     acceptance_command = _safe_custom_acceptance_command(body.acceptance_command)
     task = _create_multifile_harness_task(
         db,
@@ -187,6 +199,7 @@ def create_evaluation_runs(
             f"evaluation:{task.id}:{_slugify(profile.name)}",
             settings,
             limiter,
+            enforce_rate_limit=False,
         )
         runs.append(run)
     return evaluation, task, runs, True
@@ -449,7 +462,16 @@ def create_run(
     idempotency_key: str | None,
     settings: Settings,
     limiter: MemoryRateLimiter,
+    enforce_rate_limit: bool = True,
 ) -> Run:
+    """Create a single pending run.
+
+    When ``enforce_rate_limit`` is False the caller is expected to have already
+    consumed one rate-limit token for the whole submission (see
+    ``create_evaluation_runs``), so that a multi-profile evaluation counts as a
+    single action instead of tripping the limiter part-way through and leaving
+    orphaned rows behind.
+    """
     task = db.get(Task, body.task_id)
     if not task:
         raise LookupError("task not found")
@@ -478,7 +500,8 @@ def create_run(
         raise PermissionError("real LLM calls are disabled by ALLOW_REAL_LLM_CALLS")
     if body.mode == "api" and body.allow_llm_calls:
         _ensure_real_api_budget_available(db, settings)
-    limiter.check(f"runs:{user_id}")
+    if enforce_rate_limit:
+        limiter.check(f"runs:{user_id}")
     run = Run(
         task_id=task.id,
         user_id=user_id,
@@ -501,6 +524,16 @@ def create_run(
 
 
 def execute_run(db: Session, run_id: int, client: HarnessClient, settings: Settings) -> bool:
+    """Execute one run through the harness and drive its state machine.
+
+    The run is claimed with an atomic ``UPDATE ... WHERE status='pending'`` so that
+    concurrent workers (or a background task racing the poller) cannot both pick up
+    the same run: only the update whose ``rowcount == 1`` proceeds, everyone else
+    returns False. From ``running`` the run moves to exactly one terminal state
+    (``pass``/``fail``/``timeout``/``cancelled``). A cancellation observed at any
+    point (via ``should_cancel``) is preserved and never overwritten by a late
+    harness result. Returns True when this call owned the execution attempt.
+    """
     claimed_at = utc_now()
     claimed = db.execute(
         update(Run)
@@ -840,6 +873,13 @@ def _run_is_cancelled(db: Session, run: Run) -> bool:
 
 
 def cost_metrics(db: Session, date_from: datetime | None = None, date_to: datetime | None = None) -> CostMetricsOut:
+    """Aggregate token usage and estimated cost, grouped by model label.
+
+    The grouping label prefers ``Run.model_provider`` (the platform-facing name,
+    e.g. ``NewAPI 5.4``) and falls back to ``Run.model`` then ``Usage.model`` so
+    that rows without an explicit provider still land in a sensible bucket. The
+    optional ``date_from``/``date_to`` bounds filter on ``Run.created_at``.
+    """
     label = func.coalesce(Run.model_provider, Run.model, Usage.model)
     query = select(label, func.count(Usage.id), func.sum(Usage.total_tokens), func.sum(Usage.estimated_cost_usd)).join(Run)
     if date_from:
