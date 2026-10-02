@@ -207,3 +207,7 @@ passed
 - 账号登录尚未接入，当前 tenant/workspace 是后端数据隔离基础，未来由登录账号自动映射。
 - Redis List 队列是 MVP，不宣称 crash-safe。
 - Docker executor 已有路径，但明天主讲重点应放在 Evaluation 闭环、worker/queue、artifact 证据、历史和成本。
+
+---
+
+More context: [opallagent.com/projects/openagent.html](https://opallagent.com/projects/openagent.html) — Project dossier for this control plane.
